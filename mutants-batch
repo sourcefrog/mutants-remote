@@ -1,0 +1,33 @@
+#! /usr/bin/fish
+
+set fish_trace 1
+
+# set bucket "cargo-mutants-tmp-844658228812"
+set bucket "mutants-tmp-0733-uswest2"
+set region "us-west-2"
+set compute_environment "mutants0-amd64"
+set queue "mutants0-amd64"
+set job_def "mutants0-amd64"
+set profile "mutants-batch-admin"
+set job_id "mutants-(uuidgen)"
+set job_id (uuidgen)
+set tmp (mktemp -d)
+set source ~/src/mutants
+
+echo "Creating tarball..."
+tar cf  $tmp/mutants.tar.zst --zstd --exclude ./target --exclude ./.git --exclude ./.jj --exclude mutants.out\* --exclude-caches -C $source .
+
+echo "Uploading tarball..."
+aws s3 cp $tmp/mutants.tar.zst s3://$bucket/$job_id/mutants.tar.zst --profile $profile --region $region
+
+set script "bash -c 'aws s3 cp s3://$bucket/$job_id/mutants.tar.zst /tmp/mutants.tar.zst && tar xf /tmp/mutants.tar.zst --zstd && cargo test --all --all-features"
+
+echo "Create job..."
+aws batch submit-job --job-name $job_id --job-queue $queue --job-definition $job_def \
+    --profile $profile --region $region \
+    --container-overrides command=[\"bash\",\"-c\",\"$script\"]
+
+# ,environment=[{\"name\":\"AWS_PROFILE\",\"value\":\"$profile\"},{\"name\":\"AWS_REGION\",\"value\":\"$region\"}]
+
+# This works?
+#  ["/bin/sh","-ex","-c","yum install -y gzip rust tar zstd cargo awscli-2 && aws s3 cp s3://mutants-tmp-0733-uswest2/d2af2b92-a8bc-495d-a2d4-0fce10830929/mutants.tar.zst /tmp/mutants.tar.zstd && tar xf /tmp/mutants.tar.zstd --zstd && curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin && cargo test"]
