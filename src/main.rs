@@ -10,7 +10,8 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
     EcsPropertiesOverride, JobStatus, TaskContainerOverrides, TaskPropertiesOverride,
 };
-use log_tail::LogTail;
+use aws_sdk_s3::primitives::ByteStream;
+use bytes::Bytes;
 use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
@@ -23,10 +24,11 @@ use tracing_subscriber::{
 };
 
 mod log_tail;
+use crate::log_tail::LogTail;
 
 #[tokio::main]
 async fn main() {
-    let job_name = format!(
+    let invocation_id = format!(
         "{time}-{random}",
         time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -34,7 +36,7 @@ async fn main() {
             .as_secs(),
         random = fastrand::u32(..)
     );
-    setup_tracing(&job_name);
+    setup_tracing(&invocation_id);
     let bucket = "mutants-tmp-0733-uswest2";
     // region="us-west-2"
     // let compute_environment = "mutants0-amd64";
@@ -42,8 +44,8 @@ async fn main() {
     let job_def = "mutants0-amd64";
     let tarball_id = "d2af2b92-a8bc-495d-a2d4-0fce10830929"; //  "e1013963-8d90-458a-a42f-950ab6271e31";
     let log_group_name = "/aws/batch/job";
-    // job_id="$(date -Iminutes)-$SRANDOM"
-    // tmp=$(mktemp -d)
+    // TODO: Push this into the JobDefinition
+    // let image_url = "ghcr.io/sourcefrog/cargo-mutants:container";
 
     let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
@@ -58,23 +60,41 @@ async fn main() {
     //     .unwrap()
     //     .compute_environments;
 
-    let command = format!(
-        "yum install -y tar zstd rustc cargo clang awscli &&
+    let script = format!(
+        "
         aws s3 cp s3://{bucket}/{tarball_id}/mutants.tar.zst /tmp/mutants.tar.zst &&
         mkdir /work &&
         cd /work &&
-        cargo install cargo-nextest &&
+        cargo install cargo-nextest cargo-mutants &&
         tar xf /tmp/mutants.tar.zst --zstd &&
-        cargo test --all --all-features"
+        cargo mutants --shard 0/100 -vV || true
+        tar cfv /tmp/mutants.out.tar.zstd mutants.out --zstd &&
+        aws s3 cp /tmp/mutants.out.tar.zstd s3://{bucket}/{tarball_id}/mutants.out.tar.zstd
+        "
+    );
+    let script_key = format!("{invocation_id}/script.sh");
+
+    let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+    debug!("Uploading script to S3");
+    s3_client
+        .put_object()
+        .key(script_key.clone())
+        .body(ByteStream::from(Bytes::from(script)))
+        .bucket(bucket)
+        .send()
+        .await
+        .unwrap();
+
+    let command = format!(
+        "aws s3 cp s3://{bucket}/{script_key} /tmp/script.sh &&
+        bash -ex /tmp/script.sh
+        "
     );
 
-    // aws batch submit-job --job-name "$job_id" --job-queue "$queue" --job-definition "$job_def" \
-    //     --region "$region" \
-    //     --ecs-properties-override "taskPropertiescommand=[\"bash\",\"-c\",\"$script\"]"
     // TODO: Maybe override the log group name.
     info!("Submitting job");
     let task_container_overrides = TaskContainerOverrides::builder()
-        .set_command(Some(vec!["bash".to_owned(), "-c".to_owned(), command]))
+        .set_command(Some(vec!["bash".to_owned(), "-exc".to_owned(), command]))
         .set_name(Some("root".to_owned()))
         .build();
     let task_properties_overrides = TaskPropertiesOverride::builder()
@@ -86,7 +106,7 @@ async fn main() {
     let job_id;
     match batch_client
         .submit_job()
-        .job_name(job_name)
+        .job_name(invocation_id)
         .job_queue(queue)
         .job_definition(job_def)
         .ecs_properties_override(ecs_properties_overrides)
@@ -136,7 +156,7 @@ async fn main() {
             last_status = Some(status);
         }
         // Fetch logs before potentially exiting if the job has stopped, so that we see the final logs.
-        // TODO: Should we actually even wait a little longer for them all to arrive?
+        // TODO: Keep looking for a couple of seconds before exiting if the job has stopped.
         if let Some(log_tail) = &mut log_tail {
             for event in log_tail.get_log_events().await {
                 println!("    {}", event.message().unwrap_or_default());

@@ -16,6 +16,16 @@ Before running the script:
 
 * Create an account with a bucket, batch queue, compute environment, and roles
 
+## Making images
+
+(I could do this once on GitHub, no need for users to do it unless they want to change the image.)
+
+(This can also run on GitHub except it's very slow for Arm builds.)
+
+- Make an ECR repository
+- Make a CodeBuild project
+
+
 ## TODO
 
 - [ ] Docs/scripts/terraform to configure the static resources
