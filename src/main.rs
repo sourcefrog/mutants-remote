@@ -6,10 +6,13 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
     EcsPropertiesOverride, JobStatus, TaskContainerOverrides, TaskPropertiesOverride,
 };
+use log_tail::LogTail;
 use tokio::time::sleep;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt};
+
+mod log_tail;
 
 #[tokio::main]
 async fn main() {
@@ -30,12 +33,11 @@ async fn main() {
     // tmp=$(mktemp -d)
 
     let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
-    let config = aws_config::defaults(BehaviorVersion::latest())
+    let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region(region_provider)
         .load()
         .await;
-    let batch_client = aws_sdk_batch::Client::new(&config);
-    let logs_client = aws_sdk_cloudwatchlogs::Client::new(&config);
+    let batch_client = aws_sdk_batch::Client::new(&sdk_config);
     // let compute_envs = client
     //     .describe_compute_environments()
     //     .send()
@@ -96,9 +98,8 @@ async fn main() {
         }
     }
 
-    let mut prev_log_stream_name: Option<String> = None;
-    let mut next_log_event_token = None;
     let mut last_status: Option<JobStatus> = None;
+    let mut log_tail: Option<LogTail> = None;
 
     loop {
         sleep(Duration::from_secs(1)).await;
@@ -120,8 +121,21 @@ async fn main() {
         let job_detail = &result.jobs()[0];
         let status = job_detail.status().unwrap().to_owned();
         if last_status != Some(status.clone()) {
-            info!("Job status changed to {status}");
+            info!(
+                "Job status changed to {status} with {ecs} ecs properties and {tasks} tasks",
+                ecs = job_detail.ecs_properties().is_some() as u32,
+                tasks = job_detail
+                    .ecs_properties()
+                    .map_or(0, |ecs| ecs.task_properties().len())
+            );
             last_status = Some(status);
+        }
+        // Fetch logs before potentially exiting if the job has stopped, so that we see the final logs.
+        // TODO: Should we actually even wait a little longer for them all to arrive?
+        if let Some(log_tail) = &mut log_tail {
+            for event in log_tail.get_log_events().await {
+                println!("    {}", event.message().unwrap_or_default());
+            }
         }
         match job_detail.status().unwrap() {
             JobStatus::Succeeded => {
@@ -146,34 +160,17 @@ async fn main() {
             "Expected exactly one task"
         );
         let container_properties = &ecs_properties.task_properties()[0].containers()[0];
-        // info!(?container_properties);
         if let Some(log_stream_name) = container_properties.log_stream_name() {
-            match &prev_log_stream_name {
-                Some(prev) if prev != log_stream_name => {
-                    warn!("Log stream name changed from {prev:?} to {log_stream_name:?}",);
-                    next_log_event_token = None;
-                    prev_log_stream_name = Some(log_stream_name.to_owned());
-                }
-                Some(_) => {}
+            // TODO: Maybe spawn it instead of polling?
+            // TODO: Maybe use the live tail API.
+            match log_tail {
                 None => {
-                    prev_log_stream_name = Some(log_stream_name.to_owned());
+                    info!("Starting log tail for stream {log_stream_name}");
+                    log_tail = Some(LogTail::new(&sdk_config, log_group_name, log_stream_name));
                 }
+                Some(ref tail) => assert_eq!(tail.log_stream_name, log_stream_name),
             }
-            let log_events = logs_client
-                .get_log_events()
-                .log_group_name(log_group_name)
-                .log_stream_name(log_stream_name)
-                .start_from_head(true)
-                .set_next_token(next_log_event_token.clone())
-                .send()
-                .await
-                .unwrap();
-            for event in log_events.events() {
-                if let Some(message) = event.message() {
-                    println!("    {message}");
-                }
-            }
-            next_log_event_token = log_events.next_forward_token;
         }
+        // info!(?container_properties);
     }
 }
