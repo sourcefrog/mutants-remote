@@ -12,7 +12,7 @@ use aws_sdk_batch::types::{
 };
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
-use tokio::time::sleep;
+use tokio::time::{Instant, sleep};
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
@@ -125,6 +125,7 @@ async fn main() {
 
     let mut last_status: Option<JobStatus> = None;
     let mut log_tail: Option<LogTail> = None;
+    let mut ended_at: Option<Instant> = None;
 
     loop {
         sleep(Duration::from_secs(1)).await;
@@ -163,13 +164,14 @@ async fn main() {
             }
         }
         match job_detail.status().unwrap() {
+            _ if ended_at.is_some() => {}
             JobStatus::Succeeded => {
                 info!("Job succeeded!");
-                break;
+                ended_at = Some(Instant::now());
             }
             JobStatus::Failed => {
                 error!("Job failed!");
-                return;
+                ended_at = Some(Instant::now());
             }
             JobStatus::Running => {
                 // trace!(?job_detail);
@@ -195,6 +197,9 @@ async fn main() {
                 }
                 Some(ref tail) => assert_eq!(tail.log_stream_name, log_stream_name),
             }
+        }
+        if ended_at.is_some_and(|e| e.elapsed().as_millis() > 2000) {
+            break;
         }
         // info!(?container_properties);
     }
