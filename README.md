@@ -2,6 +2,8 @@
 
 An experimental tool to launch cargo-mutants into AWS Batch jobs.
 
+To see any output you must set `RUST_LOG=info` before running the script.
+
 ## Setup
 
 Before running the script:

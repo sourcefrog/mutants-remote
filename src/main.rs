@@ -1,6 +1,10 @@
 //! Launch cargo-mutants into AWS Batch jobs.
 
-use std::time::{Duration, SystemTime};
+use std::{
+    env::temp_dir,
+    fs::File,
+    time::{Duration, SystemTime},
+};
 
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
@@ -8,20 +12,29 @@ use aws_sdk_batch::types::{
 };
 use log_tail::LogTail;
 use tokio::time::sleep;
+use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
-use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt};
+use tracing_subscriber::{
+    Layer,
+    filter::{EnvFilter, filter_fn},
+    fmt,
+    layer::SubscriberExt,
+};
 
 mod log_tail;
 
 #[tokio::main]
 async fn main() {
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::registry()
-            .with(fmt::layer())
-            .with(EnvFilter::from_default_env()),
-    )
-    .unwrap();
+    let job_name = format!(
+        "{time}-{random}",
+        time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        random = fastrand::u32(..)
+    );
+    setup_tracing(&job_name);
     let bucket = "mutants-tmp-0733-uswest2";
     // region="us-west-2"
     // let compute_environment = "mutants0-amd64";
@@ -44,14 +57,6 @@ async fn main() {
     //     .await
     //     .unwrap()
     //     .compute_environments;
-    let job_name = format!(
-        "{time}-{random}",
-        time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        random = fastrand::u32(..)
-    );
 
     let command = format!(
         "yum install -y tar zstd rustc cargo clang awscli &&
@@ -173,4 +178,32 @@ async fn main() {
         }
         // info!(?container_properties);
     }
+}
+
+fn setup_tracing(job_name: &str) {
+    let log_path = temp_dir().join(format!("mutants-batch-{job_name}.log"));
+    let log_file = File::create(&log_path).unwrap();
+    let file_layer = fmt::Layer::new()
+        .with_ansi(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(true)
+        .with_level(true)
+        .with_writer(log_file)
+        .with_filter(filter_fn(|metadata| {
+            metadata.target().starts_with("mutants_batch")
+        }))
+        .with_filter(LevelFilter::DEBUG);
+    let stderr_layer = fmt::Layer::new()
+        .with_target(true)
+        .with_level(true)
+        .with_writer(std::io::stderr)
+        .with_filter(EnvFilter::from_default_env());
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(stderr_layer)
+            .with(file_layer),
+    )
+    .unwrap();
+    info!("Tracing initialized to file {}", log_path.display());
 }
