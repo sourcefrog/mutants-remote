@@ -65,7 +65,6 @@ async fn main() {
         aws s3 cp s3://{bucket}/{tarball_id}/mutants.tar.zst /tmp/mutants.tar.zst &&
         mkdir /work &&
         cd /work &&
-        cargo install cargo-nextest cargo-mutants &&
         tar xf /tmp/mutants.tar.zst --zstd &&
         cargo mutants --shard 0/100 -vV || true
         tar cfv /tmp/mutants.out.tar.zstd mutants.out --zstd &&
