@@ -1,15 +1,12 @@
-#!/bin/bash
+#!/bin/bash -ex
 
-set -x
-
-# set bucket="cargo-mutants-tmp-844658228812"
 bucket="mutants-tmp-0733-uswest2"
 region="us-west-2"
 compute_environment="mutants0-amd64"
 queue="mutants0-amd64"
 job_def="mutants0-amd64"
-profile="mutants-batch-admin"
-job_id=$(uuidgen)
+# profile="mutants-batch-admin"
+job_id="$(date -Iminutes)-$SRANDOM"
 tmp=$(mktemp -d)
 source=~/src/mutants
 
@@ -17,14 +14,14 @@ echo "Creating tarball..."
 tar cf "$tmp/mutants.tar.zst" --zstd --exclude ./target --exclude ./.git --exclude ./.jj --exclude mutants.out\* --exclude-caches -C "$source" .
 
 echo "Uploading tarball..."
-aws s3 cp "$tmp/mutants.tar.zst" "s3://$bucket/$job_id/mutants.tar.zst" --profile "$profile" --region "$region"
+aws s3 cp "$tmp/mutants.tar.zst" "s3://$bucket/$job_id/mutants.tar.zst" --region "$region"
 
 script="bash -c 'aws s3 cp s3://$bucket/$job_id/mutants.tar.zst /tmp/mutants.tar.zst && tar xf /tmp/mutants.tar.zst --zstd && cargo test --all --all-features'"
 
 echo "Create job..."
 aws batch submit-job --job-name "$job_id" --job-queue "$queue" --job-definition "$job_def" \
-    --profile "$profile" --region "$region" \
-    --container-overrides "command=[\"bash\",\"-c\",\"$script\"]"
+    --region "$region" \
+    --ecs-properties-override "taskPropertiescommand=[\"bash\",\"-c\",\"$script\"]"
 
 # ,environment=[{\"name\":\"AWS_PROFILE\",\"value\":\"$profile\"},{\"name\":\"AWS_REGION\",\"value\":\"$region\"}]
 
