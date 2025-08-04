@@ -44,6 +44,10 @@ async fn main() {
     let job_def = "mutants0-amd64";
     let tarball_id = "d2af2b92-a8bc-495d-a2d4-0fce10830929"; //  "e1013963-8d90-458a-a42f-950ab6271e31";
     let log_group_name = "/aws/batch/job";
+    let output_tarball_name = "mutants.out.tar.zstd";
+    let output_tarball_key = format!("{tarball_id}/{output_tarball_name}");
+    let output_tarball_url = format!("s3://{bucket}/{output_tarball_key}");
+    let job_name = format!("cargo-mutants-batch-{invocation_id}");
     // TODO: Push this into the JobDefinition
     // let image_url = "ghcr.io/sourcefrog/cargo-mutants:container";
 
@@ -53,6 +57,7 @@ async fn main() {
         .load()
         .await;
     let batch_client = aws_sdk_batch::Client::new(&sdk_config);
+    let s3_client = aws_sdk_s3::Client::new(&sdk_config);
     // let compute_envs = client
     //     .describe_compute_environments()
     //     .send()
@@ -66,14 +71,13 @@ async fn main() {
         mkdir /work &&
         cd /work &&
         tar xf /tmp/mutants.tar.zst --zstd &&
-        cargo mutants --shard 0/100 -vV || true
-        tar cfv /tmp/mutants.out.tar.zstd mutants.out --zstd &&
-        aws s3 cp /tmp/mutants.out.tar.zstd s3://{bucket}/{tarball_id}/mutants.out.tar.zstd
+        cargo mutants --shard 0/10 -vV || true
+        tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
+        aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
         "
     );
     let script_key = format!("{invocation_id}/script.sh");
 
-    let s3_client = aws_sdk_s3::Client::new(&sdk_config);
     debug!("Uploading script to S3");
     s3_client
         .put_object()
@@ -105,7 +109,7 @@ async fn main() {
     let job_id;
     match batch_client
         .submit_job()
-        .job_name(invocation_id)
+        .job_name(job_name)
         .job_queue(queue)
         .job_definition(job_def)
         .ecs_properties_override(ecs_properties_overrides)
@@ -202,6 +206,19 @@ async fn main() {
         }
         // info!(?container_properties);
     }
+
+    info!("Fetching output from {output_tarball_url}");
+    let output_tarball = s3_client
+        .get_object()
+        .bucket(bucket)
+        .key(output_tarball_key)
+        .send()
+        .await
+        .unwrap();
+    let output_tarball_path = temp_dir().join(output_tarball_name);
+    let body = output_tarball.body.collect().await.unwrap().to_vec();
+    tokio::fs::write(&output_tarball_path, body).await.unwrap();
+    info!("Output fetched to {}", output_tarball_path.display());
 }
 
 fn setup_tracing(job_name: &str) {

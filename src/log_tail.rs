@@ -2,7 +2,7 @@
 
 use aws_config::SdkConfig;
 use aws_sdk_cloudwatchlogs::types::OutputLogEvent;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(Debug, Clone)]
 pub(crate) struct LogTail {
@@ -25,6 +25,8 @@ impl LogTail {
 
     /// Get one page of log events.
     pub(crate) async fn get_log_events(&mut self) -> Vec<OutputLogEvent> {
+        info!("Fetching log events from CloudWatch Logs");
+        // TODO: Could use pagination or log tailing
         match self
             .logs_client
             .get_log_events()
