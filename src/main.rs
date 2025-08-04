@@ -26,6 +26,8 @@ use tracing_subscriber::{
 mod log_tail;
 use crate::log_tail::LogTail;
 
+const INVOCATION_TAG_NAME: &str = "mutants-batch-invocation";
+
 #[tokio::main]
 async fn main() {
     let invocation_id = format!(
@@ -50,6 +52,8 @@ async fn main() {
     let job_name = format!("cargo-mutants-batch-{invocation_id}");
     // TODO: Push this into the JobDefinition
     // let image_url = "ghcr.io/sourcefrog/cargo-mutants:container";
+
+    // TODO: Tar up and upload the source
 
     let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
@@ -82,6 +86,7 @@ async fn main() {
     s3_client
         .put_object()
         .key(script_key.clone())
+        .tagging(format!("{INVOCATION_TAG_NAME}={invocation_id}"))
         .body(ByteStream::from(Bytes::from(script)))
         .bucket(bucket)
         .send()
@@ -112,6 +117,8 @@ async fn main() {
         .job_name(job_name)
         .job_queue(queue)
         .job_definition(job_def)
+        .tags(INVOCATION_TAG_NAME, invocation_id)
+        .propagate_tags(true)
         .ecs_properties_override(ecs_properties_overrides)
         .send()
         .await
