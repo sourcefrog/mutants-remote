@@ -111,7 +111,7 @@ async fn main() {
         .job_name(job_name)
         .job_queue(queue)
         .job_definition(job_def)
-        .tags(INVOCATION_TAG_NAME, invocation_id)
+        .tags(INVOCATION_TAG_NAME, invocation_id.clone())
         .propagate_tags(true)
         .ecs_properties_override(ecs_properties_overrides)
         .send()
@@ -151,13 +151,14 @@ async fn main() {
         let job_detail = &result.jobs()[0];
         let status = job_detail.status().unwrap().to_owned();
         if last_status != Some(status.clone()) {
-            info!(
-                "Job status changed to {status} with {ecs} ecs properties and {tasks} tasks",
-                ecs = job_detail.ecs_properties().is_some() as u32,
-                tasks = job_detail
-                    .ecs_properties()
-                    .map_or(0, |ecs| ecs.task_properties().len())
-            );
+            info!(?job_id, "Job status changed to {status}");
+            // info!(
+            //     "Job status changed to {status} with {ecs} ecs properties and {tasks} tasks","
+            //     ecs = job_detail.ecs_properties().is_some() as u32,
+            //     tasks = job_detail
+            //         .ecs_properties()
+            //         .map_or(0, |ecs| ecs.task_properties().len())
+            // );
             last_status = Some(status);
         }
         // Fetch logs before potentially exiting if the job has stopped, so that we see the final logs.
@@ -231,7 +232,8 @@ async fn main() {
         .send()
         .await
         .unwrap();
-    let output_tarball_path = temp_dir().join(output_tarball_name);
+    let output_tarball_path =
+        temp_dir().join(format!("mutants-batch-output-{invocation_id}.tar.zstd"));
     let body = output_tarball.body.collect().await.unwrap().to_vec();
     tokio::fs::write(&output_tarball_path, body).await.unwrap();
     info!("Output fetched to {}", output_tarball_path.display());
