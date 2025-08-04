@@ -1,10 +1,6 @@
 //! Launch cargo-mutants into AWS Batch jobs.
 
-use std::{
-    env::temp_dir,
-    fs::File,
-    time::{Duration, SystemTime},
-};
+use std::{env::temp_dir, fs::File, time::Duration};
 
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
@@ -30,14 +26,7 @@ const INVOCATION_TAG_NAME: &str = "mutants-batch-invocation";
 
 #[tokio::main]
 async fn main() {
-    let invocation_id = format!(
-        "{time}-{random}",
-        time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        random = fastrand::u32(..)
-    );
+    let invocation_id = invocation_id();
     setup_tracing(&invocation_id);
     let bucket = "mutants-tmp-0733-uswest2";
     // region="us-west-2"
@@ -60,8 +49,13 @@ async fn main() {
         .region(region_provider)
         .load()
         .await;
+    let sts_client = aws_sdk_sts::Client::new(&sdk_config);
     let batch_client = aws_sdk_batch::Client::new(&sdk_config);
     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+
+    let caller_identity = sts_client.get_caller_identity().send().await.unwrap();
+    let account_id = caller_identity.account().unwrap().to_owned();
+    debug!(?account_id);
     // let compute_envs = client
     //     .describe_compute_environments()
     //     .send()
@@ -75,7 +69,7 @@ async fn main() {
         mkdir /work &&
         cd /work &&
         tar xf /tmp/mutants.tar.zst --zstd &&
-        cargo mutants --shard 0/10 -vV || true
+        cargo mutants --shard 0/100 -vV || true
         tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
         aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
         "
@@ -169,8 +163,16 @@ async fn main() {
         // Fetch logs before potentially exiting if the job has stopped, so that we see the final logs.
         // TODO: Keep looking for a couple of seconds before exiting if the job has stopped.
         if let Some(log_tail) = &mut log_tail {
-            for event in log_tail.get_log_events().await {
-                println!("    {}", event.message().unwrap_or_default());
+            match log_tail.more_log_events().await {
+                Some(events) => {
+                    for message in events {
+                        println!("    {message}");
+                    }
+                }
+                None => {
+                    info!("End of log stream");
+                    // TODO: Stop at this point if the task also stopped?
+                }
             }
         }
         match job_detail.status().unwrap() {
@@ -203,7 +205,14 @@ async fn main() {
             match log_tail {
                 None => {
                     info!("Starting log tail for stream {log_stream_name}");
-                    log_tail = Some(LogTail::new(&sdk_config, log_group_name, log_stream_name));
+                    let log_group_arn = format!(
+                        "arn:aws:logs:{}:{}:log-group:{}",
+                        sdk_config.region().unwrap(),
+                        account_id,
+                        log_group_name
+                    );
+                    log_tail =
+                        Some(LogTail::new(&sdk_config, &log_group_arn, log_stream_name).await);
                 }
                 Some(ref tail) => assert_eq!(tail.log_stream_name, log_stream_name),
             }
@@ -254,4 +263,14 @@ fn setup_tracing(job_name: &str) {
     )
     .unwrap();
     info!("Tracing initialized to file {}", log_path.display());
+}
+
+fn invocation_id() -> String {
+    let now = chrono::Local::now();
+    let time_str = now.format("%Y%m%d%H%M%S").to_string();
+    format!(
+        "{time}-{random:08x}",
+        time = time_str,
+        random = fastrand::u32(..)
+    )
 }
