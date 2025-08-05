@@ -1,5 +1,6 @@
 //! Launch cargo-mutants into AWS Batch jobs.
 
+use clap::{Parser, Subcommand};
 use std::{env::temp_dir, fs::File};
 use thiserror::Error;
 use tokio;
@@ -12,6 +13,24 @@ mod log_tail;
 use crate::cloud::{AwsCloud, Cloud};
 
 const TOOL_NAME: &str = "mutants-remote";
+
+#[derive(Parser)]
+#[command(name = "mutants-remote")]
+#[command(about = "Launch cargo-mutants into AWS Batch jobs")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a mutants test suite
+    Run {
+        /// Total number of shards
+        #[arg(long, default_value = "100")]
+        shards: u32,
+    },
+}
 
 // TODO: Also try `thistermination` to give specific error codes...
 #[derive(Error, Debug)]
@@ -53,6 +72,14 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Run { shards } => run_command(shards).await,
+    }
+}
+
+async fn run_command(shards: u32) -> Result<(), Error> {
     let suite_id = suite_id();
     setup_tracing(&suite_id);
 
@@ -66,7 +93,7 @@ async fn main() -> Result<(), Error> {
         aws_log_group_name: "/aws/batch/job".to_string(),
     };
     let suite = Suite {
-        suite_id,
+        suite_id: suite_id.clone(),
         config,
         tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(), // TODO: Remove, upload the source tarball.
     };
@@ -84,8 +111,7 @@ async fn main() -> Result<(), Error> {
 
     // Submit job
     let shard_k = 0;
-    let shard_n = 100;
-    let script = format!("cargo mutants --shard {shard_k}/{shard_n} -vV || true");
+    let script = format!("cargo mutants --shard {shard_k}/{shards} -vV || true");
     let job_name = format!(
         "{TOOL_NAME}-{suite_id}-shard-{shard_k}",
         suite_id = suite.suite_id
