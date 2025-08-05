@@ -17,7 +17,7 @@ use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info};
 
 use crate::log_tail::LogTail;
-use crate::{SOURCE_TARBALL_NAME, Suite};
+use crate::{SOURCE_TARBALL_NAME, Suite, TOOL_NAME};
 
 static SUITE_ID_TAG: &str = "mutants-remote-suite";
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -100,8 +100,12 @@ impl AwsCloud {
         })
     }
 
+    fn s3_key_prefix(&self) -> String {
+        format!("{TOOL_NAME}/{suite_id}", suite_id = self.suite.suite_id)
+    }
+
     fn source_tarball_key(&self) -> String {
-        format!("{}/{}", self.suite.suite_id, SOURCE_TARBALL_NAME)
+        format!("{}/{}", self.s3_key_prefix(), SOURCE_TARBALL_NAME)
     }
 
     fn source_tarball_s3_url(&self) -> String {
@@ -113,7 +117,7 @@ impl AwsCloud {
     }
 
     fn output_tarball_key(&self) -> String {
-        format!("{}/{}", self.suite.suite_id, OUTPUT_TARBALL_NAME)
+        format!("{}/{}", self.s3_key_prefix(), OUTPUT_TARBALL_NAME)
     }
 
     fn output_tarball_s3_url(&self) -> String {
@@ -317,8 +321,11 @@ impl Cloud for AwsCloud {
             .await
             .map_err(|e| CloudError::S3(e.into()))?;
 
-        let output_tarball_path =
-            std::env::temp_dir().join(format!("mutants-remote-output-{}.tar.zstd", job_id.0));
+        let output_tarball_path = std::env::temp_dir().join(format!(
+            "mutants-remote-output-{suite_id}-{job_id}.tar.zstd",
+            suite_id = self.suite.suite_id,
+            job_id = job_id.0
+        ));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&output_tarball_path, body)
             .await
