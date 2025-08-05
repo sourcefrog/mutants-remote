@@ -9,7 +9,7 @@ use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
 mod log_tail;
-use crate::cloud::{AwsCloud, Cloud, JobConfig};
+use crate::cloud::{AwsCloud, Cloud};
 
 const TOOL_NAME: &str = "mutants-remote";
 
@@ -35,25 +35,47 @@ pub enum Error {
     // Config(String),
 }
 
+/// A general description of the suite to run, including the config.
+#[derive(Debug, Clone)]
+pub struct Suite {
+    pub suite_id: String,
+    pub config: Config,
+    pub tarball_id: String,
+}
+
+/// User-provided configuration.
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub bucket: String,
+    pub queue: String,
+    pub job_def: String,
+    pub log_group_name: String,
+}
+
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let invocation_id = invocation_id();
-    setup_tracing(&invocation_id);
+    let suite_id = suite_id();
+    setup_tracing(&suite_id);
 
     // TODO: Tar up the source directory, maybe from `-d`.
 
     // Create job configuration
-    let config = JobConfig {
+    let config = Config {
         bucket: "mutants-tmp-0733-uswest2".to_string(),
         queue: "mutants0-amd64".to_string(),
         job_def: "mutants0-amd64".to_string(),
-        tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(),
         log_group_name: "/aws/batch/job".to_string(),
-        output_tarball_name: "mutants.out.tar.zstd".to_string(),
+        // output_tarball_name: "mutants.out.tar.zstd".to_string(),
+    };
+    let suite = Suite {
+        suite_id,
+        config,
+        tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(),
     };
 
     // Create AWS cloud provider
-    let cloud = match AwsCloud::new().await {
+    let cloud = match AwsCloud::new(suite.clone()).await {
         Ok(cloud) => cloud,
         Err(err) => {
             error!("Failed to initialize AWS cloud: {err}");
@@ -61,22 +83,10 @@ async fn main() -> Result<(), Error> {
         }
     };
 
-    // Upload script
-    let script = "cargo mutants --shard 0/100 -vV || true".to_string();
-    let script_key = match cloud.upload_script(script, &invocation_id, &config).await {
-        Ok(key) => key,
-        Err(err) => {
-            error!("Failed to upload script: {err}");
-            return Err(Error::Cloud(err));
-        }
-    };
-
     // Submit job
-    let job_name = format!("{TOOL_NAME}-{invocation_id}");
-    let job_id = match cloud
-        .submit_job(script_key, job_name, &invocation_id, &config)
-        .await
-    {
+    let script = "cargo mutants --shard 0/100 -vV || true".to_string();
+    let job_name = format!("{TOOL_NAME}-{}", suite.suite_id);
+    let job_id = match cloud.submit_job(script, job_name).await {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to submit job: {err}");
@@ -85,13 +95,13 @@ async fn main() -> Result<(), Error> {
     };
 
     // Monitor job
-    if let Err(err) = cloud.monitor_job(job_id, &config).await {
+    if let Err(err) = cloud.monitor_job(&job_id).await {
         error!("Failed to monitor job: {err}");
         return Err(Error::Cloud(err));
     }
 
     // Fetch output
-    match cloud.fetch_output(&invocation_id, &config).await {
+    match cloud.fetch_output(&job_id).await {
         Ok(output_path) => {
             info!(
                 "Job completed successfully. Output available at: {}",
@@ -135,7 +145,7 @@ fn setup_tracing(job_name: &str) {
     info!("Tracing initialized to file {}", log_path.display());
 }
 
-fn invocation_id() -> String {
+fn suite_id() -> String {
     let now = chrono::Local::now();
     let time_str = now.format("%Y%m%d%H%M%S").to_string();
     format!(

@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::log_tail::LogTail;
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
@@ -16,6 +15,12 @@ use bytes::Bytes;
 use thiserror::Error;
 use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info};
+
+use crate::Suite;
+use crate::log_tail::LogTail;
+
+static SUITE_ID_TAG: &str = "mutants-remote-suite";
+static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
 #[derive(Error, Debug)]
 pub enum CloudError {
@@ -35,37 +40,11 @@ pub enum CloudError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone)]
-pub struct JobConfig {
-    pub bucket: String,
-    pub queue: String,
-    pub job_def: String,
-    pub tarball_id: String,
-    pub log_group_name: String,
-    pub output_tarball_name: String,
-}
-
 #[async_trait]
 pub trait Cloud {
-    async fn upload_script(
-        &self,
-        script: String,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<String, CloudError>;
-    async fn submit_job(
-        &self,
-        command: String,
-        job_name: String,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<String, CloudError>;
-    async fn monitor_job(&self, job_id: String, config: &JobConfig) -> Result<(), CloudError>;
-    async fn fetch_output(
-        &self,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<PathBuf, CloudError>;
+    async fn submit_job(&self, script: String, job_name: String) -> Result<String, CloudError>;
+    async fn monitor_job(&self, job_id: &str) -> Result<(), CloudError>;
+    async fn fetch_output(&self, job_id: &str) -> Result<PathBuf, CloudError>;
 }
 
 pub struct AwsCloud {
@@ -73,10 +52,11 @@ pub struct AwsCloud {
     batch_client: aws_sdk_batch::Client,
     s3_client: aws_sdk_s3::Client,
     account_id: String,
+    suite: Suite,
 }
 
 impl AwsCloud {
-    pub async fn new() -> Result<Self, CloudError> {
+    pub async fn new(suite: Suite) -> Result<Self, CloudError> {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
@@ -100,66 +80,54 @@ impl AwsCloud {
             batch_client,
             s3_client,
             account_id,
+            suite,
         })
     }
 }
 
 #[async_trait]
 impl Cloud for AwsCloud {
-    async fn upload_script(
-        &self,
-        _script: String,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<String, CloudError> {
-        let script_key = format!("{invocation_id}/script.sh");
-        let output_tarball_key = format!("{}/{}", config.tarball_id, config.output_tarball_name);
-        let output_tarball_url = format!("s3://{}/{}", config.bucket, output_tarball_key);
+    async fn submit_job(&self, script: String, job_name: String) -> Result<String, CloudError> {
+        // Because AWS has modest limits on the length of the size of the job overrides we upload
+        // the script to S3 and then fetch that object.
+        let script_key = format!("{}/script.sh", self.suite.suite_id);
+        let output_tarball_url = output_tarball_s3_url(&self.suite);
 
-        let script_with_output = format!(
+        let wrapped_script = format!(
             "
             aws s3 cp s3://{bucket}/{tarball_id}/mutants.tar.zst /tmp/mutants.tar.zst &&
             mkdir /work &&
             cd /work &&
             tar xf /tmp/mutants.tar.zst --zstd &&
-            cargo mutants --shard 0/100 -vV || true
+            {script}
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
-            bucket = config.bucket,
-            tarball_id = config.tarball_id,
+            bucket = self.suite.config.bucket,
+            tarball_id = self.suite.tarball_id,
             output_tarball_url = output_tarball_url
         );
 
-        debug!("Uploading script to S3");
         self.s3_client
             .put_object()
             .key(script_key.clone())
-            .tagging(format!("mutants-remote-invocation={}", invocation_id))
-            .body(ByteStream::from(Bytes::from(script_with_output)))
-            .bucket(&config.bucket)
+            .tagging(format!("{SUITE_ID_TAG}={}", self.suite.suite_id))
+            .body(ByteStream::from(Bytes::from(wrapped_script)))
+            .bucket(&self.suite.config.bucket)
             .send()
             .await
             .map_err(|e| CloudError::S3(e.into()))?;
-
-        Ok(script_key)
-    }
-
-    async fn submit_job(
-        &self,
-        _command: String,
-        job_name: String,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<String, CloudError> {
-        let script_key = format!("{invocation_id}/script.sh");
+        let script_key = format!("{}/script.sh", self.suite.suite_id);
+        let script_s3_url = format!(
+            "s3://{bucket}/{script_key}",
+            bucket = self.suite.config.bucket,
+        );
         let full_command = format!(
-            "aws s3 cp s3://{bucket}/{script_key} /tmp/script.sh &&
+            "aws s3 cp {script_s3_url} /tmp/script.sh &&
             bash -ex /tmp/script.sh
             ",
-            bucket = config.bucket,
-            script_key = script_key
         );
+        debug!(?script_s3_url, "Uploading script to S3");
 
         info!("Submitting job");
         let task_container_overrides = TaskContainerOverrides::builder()
@@ -177,13 +145,14 @@ impl Cloud for AwsCloud {
             .task_properties(task_properties_overrides)
             .build();
 
+        // TODO: Also a job id tag?
         let result = self
             .batch_client
             .submit_job()
             .job_name(job_name)
-            .job_queue(&config.queue)
-            .job_definition(&config.job_def)
-            .tags("mutants-remote-invocation", invocation_id.to_string())
+            .job_queue(&self.suite.config.queue)
+            .job_definition(&self.suite.config.job_def)
+            .tags(SUITE_ID_TAG, self.suite.suite_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
             .send()
@@ -195,7 +164,8 @@ impl Cloud for AwsCloud {
         Ok(job_id)
     }
 
-    async fn monitor_job(&self, job_id: String, config: &JobConfig) -> Result<(), CloudError> {
+    async fn monitor_job(&self, job_id: &str) -> Result<(), CloudError> {
+        // TODO: Clearer names for the ID assigned by the cloud vs the name chosen by us.
         let mut last_status: Option<JobStatus> = None;
         let mut log_tail: Option<LogTail> = None;
         let mut ended_at: Option<Instant> = None;
@@ -205,7 +175,7 @@ impl Cloud for AwsCloud {
             let result = self
                 .batch_client
                 .describe_jobs()
-                .jobs(job_id.clone())
+                .jobs(job_id)
                 .send()
                 .await
                 .map_err(|e| CloudError::Batch(e.into()))?;
@@ -262,7 +232,7 @@ impl Cloud for AwsCloud {
                             "arn:aws:logs:{}:{}:log-group:{}",
                             self.sdk_config.region().unwrap(),
                             self.account_id,
-                            config.log_group_name
+                            self.suite.config.log_group_name
                         );
                         log_tail = Some(
                             LogTail::new(&self.sdk_config, &log_group_arn, log_stream_name).await,
@@ -280,26 +250,20 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn fetch_output(
-        &self,
-        invocation_id: &str,
-        config: &JobConfig,
-    ) -> Result<PathBuf, CloudError> {
-        let output_tarball_key = format!("{}/{}", config.tarball_id, config.output_tarball_name);
-        let output_tarball_url = format!("s3://{}/{}", config.bucket, output_tarball_key);
+    async fn fetch_output(&self, job_id: &str) -> Result<PathBuf, CloudError> {
+        let output_tarball_key = output_tarball_key(&self.suite);
 
-        info!("Fetching output from {output_tarball_url}");
         let output_tarball = self
             .s3_client
             .get_object()
-            .bucket(&config.bucket)
+            .bucket(&self.suite.config.bucket)
             .key(&output_tarball_key)
             .send()
             .await
             .map_err(|e| CloudError::S3(e.into()))?;
 
         let output_tarball_path =
-            std::env::temp_dir().join(format!("mutants-remote-output-{}.tar.zstd", invocation_id));
+            std::env::temp_dir().join(format!("mutants-remote-output-{}.tar.zstd", job_id));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&output_tarball_path, body)
             .await
@@ -308,4 +272,12 @@ impl Cloud for AwsCloud {
 
         Ok(output_tarball_path)
     }
+}
+
+fn output_tarball_key(suite: &Suite) -> String {
+    format!("{}/{}", suite.tarball_id, OUTPUT_TARBALL_NAME)
+}
+
+fn output_tarball_s3_url(suite: &Suite) -> String {
+    format!("s3://{}/{}", suite.config.bucket, output_tarball_key(suite))
 }
