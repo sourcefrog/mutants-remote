@@ -42,9 +42,9 @@ pub enum CloudError {
 
 #[async_trait]
 pub trait Cloud {
-    async fn submit_job(&self, script: String, job_name: String) -> Result<String, CloudError>;
-    async fn monitor_job(&self, job_id: &str) -> Result<(), CloudError>;
-    async fn fetch_output(&self, job_id: &str) -> Result<PathBuf, CloudError>;
+    async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError>;
+    async fn monitor_job(&self, job_id: &CloudJobId) -> Result<(), CloudError>;
+    async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError>;
 }
 
 pub struct AwsCloud {
@@ -54,6 +54,10 @@ pub struct AwsCloud {
     account_id: String,
     suite: Suite,
 }
+
+/// The identifier for a job assigned by the cloud.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CloudJobId(String);
 
 impl AwsCloud {
     pub async fn new(suite: Suite) -> Result<Self, CloudError> {
@@ -87,7 +91,7 @@ impl AwsCloud {
 
 #[async_trait]
 impl Cloud for AwsCloud {
-    async fn submit_job(&self, script: String, job_name: String) -> Result<String, CloudError> {
+    async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
         let script_key = format!("{}/script.sh", self.suite.suite_id);
@@ -136,7 +140,7 @@ impl Cloud for AwsCloud {
                 "-exc".to_owned(),
                 full_command,
             ]))
-            .set_name(Some("root".to_owned()))
+            .set_name(Some("root".to_owned())) // container name
             .build();
         let task_properties_overrides = TaskPropertiesOverride::builder()
             .containers(task_container_overrides)
@@ -161,11 +165,10 @@ impl Cloud for AwsCloud {
 
         let job_id = result.job_id().unwrap().to_owned();
         info!(?job_id, "Job submitted successfully: {:?}", result);
-        Ok(job_id)
+        Ok(CloudJobId(job_id))
     }
 
-    async fn monitor_job(&self, job_id: &str) -> Result<(), CloudError> {
-        // TODO: Clearer names for the ID assigned by the cloud vs the name chosen by us.
+    async fn monitor_job(&self, job_id: &CloudJobId) -> Result<(), CloudError> {
         let mut last_status: Option<JobStatus> = None;
         let mut log_tail: Option<LogTail> = None;
         let mut ended_at: Option<Instant> = None;
@@ -175,7 +178,7 @@ impl Cloud for AwsCloud {
             let result = self
                 .batch_client
                 .describe_jobs()
-                .jobs(job_id)
+                .jobs(job_id.0.clone())
                 .send()
                 .await
                 .map_err(|e| CloudError::Batch(e.into()))?;
@@ -183,7 +186,7 @@ impl Cloud for AwsCloud {
             let job_detail = &result.jobs()[0];
             let status = job_detail.status().unwrap().to_owned();
             if last_status != Some(status.clone()) {
-                info!(?job_id, "Job status changed to {status}");
+                info!(cloud_job_id = ?job_id.0, "Job status changed to {status}");
                 last_status = Some(status);
             }
 
@@ -250,7 +253,7 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn fetch_output(&self, job_id: &str) -> Result<PathBuf, CloudError> {
+    async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError> {
         let output_tarball_key = output_tarball_key(&self.suite);
 
         let output_tarball = self
@@ -263,7 +266,7 @@ impl Cloud for AwsCloud {
             .map_err(|e| CloudError::S3(e.into()))?;
 
         let output_tarball_path =
-            std::env::temp_dir().join(format!("mutants-remote-output-{}.tar.zstd", job_id));
+            std::env::temp_dir().join(format!("mutants-remote-output-{}.tar.zstd", job_id.0));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&output_tarball_path, body)
             .await
