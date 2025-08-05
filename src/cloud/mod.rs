@@ -64,6 +64,14 @@ impl AwsCloud {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
+            .app_name(
+                aws_config::AppName::new(format!(
+                    "{}-{}",
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .unwrap(),
+            )
             .load()
             .await;
 
