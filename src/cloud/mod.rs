@@ -2,7 +2,7 @@
 //!
 //! Provides an aspirationally generic interface for cloud providers: the core features are to get and put files, launch jobs, and monitor the status of jobs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -16,8 +16,8 @@ use thiserror::Error;
 use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info};
 
-use crate::Suite;
 use crate::log_tail::LogTail;
+use crate::{SOURCE_TARBALL_NAME, Suite};
 
 static SUITE_ID_TAG: &str = "mutants-remote-suite";
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -38,10 +38,14 @@ pub enum CloudError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("ByteStream error: {0}")]
+    ByteStream(#[from] aws_sdk_s3::primitives::ByteStreamError),
 }
 
 #[async_trait]
 pub trait Cloud {
+    async fn upload_source_tarball(&self, source_tarball: &Path) -> Result<(), CloudError>;
     async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError>;
     async fn monitor_job(&self, job_id: &CloudJobId) -> Result<(), CloudError>;
     async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError>;
@@ -95,19 +99,60 @@ impl AwsCloud {
             suite,
         })
     }
+
+    fn source_tarball_key(&self) -> String {
+        format!("{}/{}", self.suite.suite_id, SOURCE_TARBALL_NAME)
+    }
+
+    fn source_tarball_s3_url(&self) -> String {
+        format!(
+            "s3://{}/{}",
+            self.suite.config.aws_s3_bucket,
+            self.source_tarball_key()
+        )
+    }
+
+    fn output_tarball_key(&self) -> String {
+        format!("{}/{}", self.suite.suite_id, OUTPUT_TARBALL_NAME)
+    }
+
+    fn output_tarball_s3_url(&self) -> String {
+        format!(
+            "s3://{}/{}",
+            self.suite.config.aws_s3_bucket,
+            self.output_tarball_key()
+        )
+    }
 }
 
 #[async_trait]
 impl Cloud for AwsCloud {
+    async fn upload_source_tarball(&self, source_tarball: &Path) -> Result<(), CloudError> {
+        debug!("Uploading source tarball to S3");
+        let source_tarball_body = ByteStream::from_path(source_tarball)
+            .await
+            .map_err(CloudError::ByteStream)?;
+        self.s3_client
+            .put_object()
+            .bucket(&self.suite.config.aws_s3_bucket)
+            .key(self.source_tarball_key())
+            .body(source_tarball_body)
+            .tagging(format!("{SUITE_ID_TAG}={}", self.suite.suite_id))
+            .send()
+            .await
+            .map_err(|e| CloudError::S3(e.into()))?;
+        Ok(())
+    }
+
     async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
         let script_key = format!("{}/script.sh", self.suite.suite_id);
-        let output_tarball_url = output_tarball_s3_url(&self.suite);
+        let output_tarball_url = self.output_tarball_s3_url();
 
         let wrapped_script = format!(
             "
-            aws s3 cp s3://{bucket}/{tarball_id}/mutants.tar.zst /tmp/mutants.tar.zst &&
+            aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
             mkdir /work &&
             cd /work &&
             tar xf /tmp/mutants.tar.zst --zstd &&
@@ -115,9 +160,8 @@ impl Cloud for AwsCloud {
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
-            bucket = self.suite.config.aws_s3_bucket,
-            tarball_id = self.suite.tarball_id,
-            output_tarball_url = output_tarball_url
+            source_tarball_s3_url = self.source_tarball_s3_url(),
+            output_tarball_url = output_tarball_url,
         );
 
         self.s3_client
@@ -262,7 +306,7 @@ impl Cloud for AwsCloud {
     }
 
     async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError> {
-        let output_tarball_key = output_tarball_key(&self.suite);
+        let output_tarball_key = self.output_tarball_key();
 
         let output_tarball = self
             .s3_client
@@ -278,21 +322,9 @@ impl Cloud for AwsCloud {
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&output_tarball_path, body)
             .await
-            .map_err(|e| CloudError::Io(e))?;
+            .map_err(CloudError::Io)?;
         info!("Output fetched to {}", output_tarball_path.display());
 
         Ok(output_tarball_path)
     }
-}
-
-fn output_tarball_key(suite: &Suite) -> String {
-    format!("{}/{}", suite.tarball_id, OUTPUT_TARBALL_NAME)
-}
-
-fn output_tarball_s3_url(suite: &Suite) -> String {
-    format!(
-        "s3://{}/{}",
-        suite.config.aws_s3_bucket,
-        output_tarball_key(suite)
-    )
 }

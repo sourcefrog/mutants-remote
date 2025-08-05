@@ -1,9 +1,11 @@
 //! Launch cargo-mutants into AWS Batch jobs.
 
-use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
 use std::{env::temp_dir, fs::File};
+
+use clap::{Parser, Subcommand};
 use thiserror::Error;
-use tokio;
+use tokio::process::Command;
 use tracing::level_filters::LevelFilter;
 use tracing::{error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
@@ -12,7 +14,8 @@ mod cloud;
 mod log_tail;
 use crate::cloud::{AwsCloud, Cloud};
 
-const TOOL_NAME: &str = "mutants-remote";
+static TOOL_NAME: &str = "mutants-remote";
+static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
 
 #[derive(Parser)]
 #[command(name = "mutants-remote")]
@@ -26,6 +29,10 @@ struct Cli {
 enum Commands {
     /// Run a mutants test suite
     Run {
+        /// Source directory to run mutants on
+        #[arg(long, short = 'd')]
+        source: PathBuf,
+
         /// Total number of shards
         #[arg(long, default_value = "100")]
         shards: u32,
@@ -40,6 +47,9 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Tar failed: {0}")]
+    Tar(String),
     // #[allow(dead_code)]
     // #[error("Job failed with status: {0}")]
     // JobFailed(String),
@@ -58,7 +68,6 @@ pub enum Error {
 pub struct Suite {
     pub suite_id: String,
     pub config: Config,
-    pub tarball_id: String,
 }
 
 /// User-provided configuration.
@@ -75,15 +84,13 @@ async fn main() -> Result<(), Error> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { shards } => run_command(shards).await,
+        Commands::Run { source, shards } => run_command(source, shards).await,
     }
 }
 
-async fn run_command(shards: u32) -> Result<(), Error> {
+async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     let suite_id = suite_id();
     setup_tracing(&suite_id);
-
-    // TODO: Tar up the source directory, maybe from `-d`.
 
     // Create job configuration
     let config = Config {
@@ -95,7 +102,6 @@ async fn run_command(shards: u32) -> Result<(), Error> {
     let suite = Suite {
         suite_id: suite_id.clone(),
         config,
-        tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(), // TODO: Remove, upload the source tarball.
     };
 
     // Create AWS cloud provider
@@ -106,6 +112,15 @@ async fn run_command(shards: u32) -> Result<(), Error> {
             return Err(Error::Cloud(err));
         }
     };
+
+    let source_tarball = tar_source(&source_dir).await?;
+    match cloud.upload_source_tarball(&source_tarball).await {
+        Ok(()) => {}
+        Err(err) => {
+            error!("Failed to upload source tarball: {err}");
+            return Err(Error::Cloud(err));
+        }
+    }
 
     // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
@@ -146,6 +161,28 @@ async fn run_command(shards: u32) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Tar up the source directory and return the temporary path to the tarball.
+async fn tar_source(source: &Path) -> Result<PathBuf, Error> {
+    let temp_dir = temp_dir();
+    let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
+    let mut child = Command::new("tar")
+        .arg("--zstd")
+        .arg("-cf")
+        .arg(&tarball_path)
+        .arg("-C")
+        .arg(source)
+        .arg("--exclude")
+        .arg("target")
+        .arg(".")
+        .spawn()
+        .map_err(Error::Io)?;
+    let exit_status = child.wait().await.map_err(Error::Io)?;
+    if !exit_status.success() {
+        return Err(Error::Tar(format!("tar failed: {exit_status}")));
+    }
+    Ok(tarball_path)
 }
 
 fn setup_tracing(suite_id: &str) {
