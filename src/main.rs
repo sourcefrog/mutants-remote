@@ -21,7 +21,6 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-
     // #[allow(dead_code)]
     // #[error("Job failed with status: {0}")]
     // JobFailed(String),
@@ -52,7 +51,6 @@ pub struct Config {
     pub log_group_name: String,
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let suite_id = suite_id();
@@ -66,12 +64,11 @@ async fn main() -> Result<(), Error> {
         queue: "mutants0-amd64".to_string(),
         job_def: "mutants0-amd64".to_string(),
         log_group_name: "/aws/batch/job".to_string(),
-        // output_tarball_name: "mutants.out.tar.zstd".to_string(),
     };
     let suite = Suite {
         suite_id,
         config,
-        tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(),
+        tarball_id: "d2af2b92-a8bc-495d-a2d4-0fce10830929".to_string(), // TODO: Remove, upload the source tarball.
     };
 
     // Create AWS cloud provider
@@ -83,9 +80,17 @@ async fn main() -> Result<(), Error> {
         }
     };
 
+    // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
+
     // Submit job
-    let script = "cargo mutants --shard 0/100 -vV || true".to_string();
-    let job_name = format!("{TOOL_NAME}-{}", suite.suite_id);
+    let shard_k = 0;
+    let shard_n = 100;
+    let script = format!("cargo mutants --shard {shard_k}/{shard_n} -vV || true");
+    let job_name = format!(
+        "{TOOL_NAME}-{suite_id}-shard-{shard_k}",
+        suite_id = suite.suite_id
+    );
+    // TODO: Maybe pass in the shard_k and shard_n to be used as tags?
     let job_id = match cloud.submit_job(script, job_name).await {
         Ok(id) => id,
         Err(err) => {
@@ -117,8 +122,8 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn setup_tracing(job_name: &str) {
-    let log_path = temp_dir().join(format!("{TOOL_NAME}-{job_name}.log"));
+fn setup_tracing(suite_id: &str) {
+    let log_path = temp_dir().join(format!("{TOOL_NAME}-{suite_id}.log"));
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)
