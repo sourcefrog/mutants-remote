@@ -115,7 +115,7 @@ impl Cloud for AwsCloud {
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
-            bucket = self.suite.config.bucket,
+            bucket = self.suite.config.aws_s3_bucket,
             tarball_id = self.suite.tarball_id,
             output_tarball_url = output_tarball_url
         );
@@ -125,14 +125,14 @@ impl Cloud for AwsCloud {
             .key(script_key.clone())
             .tagging(format!("{SUITE_ID_TAG}={}", self.suite.suite_id))
             .body(ByteStream::from(Bytes::from(wrapped_script)))
-            .bucket(&self.suite.config.bucket)
+            .bucket(&self.suite.config.aws_s3_bucket)
             .send()
             .await
             .map_err(|e| CloudError::S3(e.into()))?;
         let script_key = format!("{}/script.sh", self.suite.suite_id);
         let script_s3_url = format!(
             "s3://{bucket}/{script_key}",
-            bucket = self.suite.config.bucket,
+            bucket = self.suite.config.aws_s3_bucket,
         );
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
@@ -162,8 +162,8 @@ impl Cloud for AwsCloud {
             .batch_client
             .submit_job()
             .job_name(job_name)
-            .job_queue(&self.suite.config.queue)
-            .job_definition(&self.suite.config.job_def)
+            .job_queue(&self.suite.config.aws_batch_job_queue)
+            .job_definition(&self.suite.config.aws_batch_job_definition)
             .tags(SUITE_ID_TAG, self.suite.suite_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
@@ -243,7 +243,7 @@ impl Cloud for AwsCloud {
                             "arn:aws:logs:{}:{}:log-group:{}",
                             self.sdk_config.region().unwrap(),
                             self.account_id,
-                            self.suite.config.log_group_name
+                            self.suite.config.aws_log_group_name
                         );
                         log_tail = Some(
                             LogTail::new(&self.sdk_config, &log_group_arn, log_stream_name).await,
@@ -267,7 +267,7 @@ impl Cloud for AwsCloud {
         let output_tarball = self
             .s3_client
             .get_object()
-            .bucket(&self.suite.config.bucket)
+            .bucket(&self.suite.config.aws_s3_bucket)
             .key(&output_tarball_key)
             .send()
             .await
@@ -290,5 +290,9 @@ fn output_tarball_key(suite: &Suite) -> String {
 }
 
 fn output_tarball_s3_url(suite: &Suite) -> String {
-    format!("s3://{}/{}", suite.config.bucket, output_tarball_key(suite))
+    format!(
+        "s3://{}/{}",
+        suite.config.aws_s3_bucket,
+        output_tarball_key(suite)
+    )
 }

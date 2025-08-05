@@ -45,10 +45,10 @@ pub struct Suite {
 /// User-provided configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub bucket: String,
-    pub queue: String,
-    pub job_def: String,
-    pub log_group_name: String,
+    pub aws_s3_bucket: String,
+    pub aws_batch_job_queue: String,
+    pub aws_batch_job_definition: String,
+    pub aws_log_group_name: String,
 }
 
 #[tokio::main]
@@ -60,10 +60,10 @@ async fn main() -> Result<(), Error> {
 
     // Create job configuration
     let config = Config {
-        bucket: "mutants-tmp-0733-uswest2".to_string(),
-        queue: "mutants0-amd64".to_string(),
-        job_def: "mutants0-amd64".to_string(),
-        log_group_name: "/aws/batch/job".to_string(),
+        aws_s3_bucket: "mutants-tmp-0733-uswest2".to_string(),
+        aws_batch_job_queue: "mutants0-amd64".to_string(),
+        aws_batch_job_definition: "mutants0-amd64".to_string(),
+        aws_log_group_name: "/aws/batch/job".to_string(),
     };
     let suite = Suite {
         suite_id,
