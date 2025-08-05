@@ -22,7 +22,8 @@ use tracing_subscriber::{
 mod log_tail;
 use crate::log_tail::LogTail;
 
-const INVOCATION_TAG_NAME: &str = "mutants-batch-invocation";
+const TOOL_NAME: &str = "mutants-remote";
+const INVOCATION_TAG_NAME: &str = "mutants-remote-invocation";
 
 #[tokio::main]
 async fn main() {
@@ -38,7 +39,7 @@ async fn main() {
     let output_tarball_name = "mutants.out.tar.zstd";
     let output_tarball_key = format!("{tarball_id}/{output_tarball_name}");
     let output_tarball_url = format!("s3://{bucket}/{output_tarball_key}");
-    let job_name = format!("cargo-mutants-batch-{invocation_id}");
+    let job_name = format!("{TOOL_NAME}-{invocation_id}");
     // TODO: Push this into the JobDefinition
     // let image_url = "ghcr.io/sourcefrog/cargo-mutants:container";
 
@@ -233,14 +234,14 @@ async fn main() {
         .await
         .unwrap();
     let output_tarball_path =
-        temp_dir().join(format!("mutants-batch-output-{invocation_id}.tar.zstd"));
+        temp_dir().join(format!("{TOOL_NAME}-output-{invocation_id}.tar.zstd"));
     let body = output_tarball.body.collect().await.unwrap().to_vec();
     tokio::fs::write(&output_tarball_path, body).await.unwrap();
     info!("Output fetched to {}", output_tarball_path.display());
 }
 
 fn setup_tracing(job_name: &str) {
-    let log_path = temp_dir().join(format!("mutants-batch-{job_name}.log"));
+    let log_path = temp_dir().join(format!("{TOOL_NAME}-{job_name}.log"));
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)
@@ -250,7 +251,7 @@ fn setup_tracing(job_name: &str) {
         .with_level(true)
         .with_writer(log_file)
         .with_filter(filter_fn(|metadata| {
-            metadata.target().starts_with("mutants_batch")
+            metadata.target().starts_with("mutants_remote")
         }))
         .with_filter(LevelFilter::DEBUG);
     let stderr_layer = fmt::Layer::new()

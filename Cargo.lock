@@ -1654,7 +1654,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mutants-batch"
+name = "mutants-remote"
 version = "0.1.0"
 dependencies = [
  "aws-config",
