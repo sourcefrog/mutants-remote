@@ -197,7 +197,10 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
             match log_tail.more_log_events().await {
                 Ok(Some(events)) => {
                     for message in events {
-                        println!("    {message}");
+                        for line in message.split(['\n', '\r']) {
+                            // some messages have just \r
+                            println!("    {line}");
+                        }
                     }
                 }
                 Ok(None) => {
