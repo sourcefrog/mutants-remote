@@ -132,6 +132,7 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
         suite_id = suite.suite_id
     );
     // TODO: Maybe pass in the shard_k and shard_n to be used as tags?
+    info!(?suite_id, ?job_name, "Submitting job");
     let job_id = match cloud.submit_job(script, job_name).await {
         Ok(id) => id,
         Err(err) => {
@@ -217,8 +218,8 @@ fn suite_id() -> String {
     let now = chrono::Local::now();
     let time_str = now.format("%Y%m%d%H%M%S").to_string();
     format!(
-        "{time}-{random:08x}",
+        "{time}-{random:04x}",
         time = time_str,
-        random = fastrand::u32(..)
+        random = fastrand::u16(..)
     )
 }
