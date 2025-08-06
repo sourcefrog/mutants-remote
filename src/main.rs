@@ -1,4 +1,10 @@
 //! Launch cargo-mutants into AWS Batch jobs.
+//!
+//! # Concepts
+//!
+//! One "suite" is a single run of cargo-mutants with a single source directory and configuration.
+//! The suite may be split into multiple shards to run in parallel, each of which is a single remote job.
+//! All the jobs in a suite are tagged with the suite ID.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
