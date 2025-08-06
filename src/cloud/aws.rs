@@ -1,30 +1,31 @@
 //! AWS Batch implementation of the Cloud abstraction.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::types::{
-    EcsPropertiesOverride, JobStatus, TaskContainerOverrides, TaskPropertiesOverride,
+    EcsPropertiesOverride, JobStatus as AwsJobStatus, TaskContainerOverrides,
+    TaskPropertiesOverride,
 };
+use aws_sdk_cloudwatchlogs::primitives::event_stream::EventReceiver;
+use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
+use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
-use tokio::time::{Instant, sleep};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudError, CloudJobId, SUITE_ID_TAG};
-use crate::cloud::LogTail;
+use super::{Cloud, CloudError, CloudJobId, JobDescription, JobStatus, LogTail, SUITE_ID_TAG};
 use crate::{SOURCE_TARBALL_NAME, Suite, TOOL_NAME};
 
-mod log_tail;
-use log_tail::AwsLogTail;
-
 pub struct AwsCloud {
+    account_id: String,
     sdk_config: aws_config::SdkConfig,
     batch_client: aws_sdk_batch::Client,
     s3_client: aws_sdk_s3::Client,
-    account_id: String,
+    logs_client: aws_sdk_cloudwatchlogs::Client,
+    /// Description of the suite being run.
+    // TODO: Does this really belong in the cloud or should it be passed in to methods?
     suite: Suite,
 }
 
@@ -47,6 +48,7 @@ impl AwsCloud {
         let sts_client = aws_sdk_sts::Client::new(&sdk_config);
         let batch_client = aws_sdk_batch::Client::new(&sdk_config);
         let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+        let logs_client = aws_sdk_cloudwatchlogs::Client::new(&sdk_config);
 
         let caller_identity = sts_client
             .get_caller_identity()
@@ -57,10 +59,11 @@ impl AwsCloud {
         debug!(?account_id);
 
         Ok(Self {
+            account_id,
             sdk_config,
             batch_client,
             s3_client,
-            account_id,
+            logs_client,
             suite,
         })
     }
@@ -189,96 +192,34 @@ impl Cloud for AwsCloud {
         Ok(CloudJobId(job_id))
     }
 
-    async fn monitor_job(&self, job_id: &CloudJobId) -> Result<(), CloudError> {
-        // TODO: Most of this is not AWS-specific: we should split off "get log status" and
-        // put the main loop in the generic program.
-        let mut last_status: Option<JobStatus> = None;
-        let mut log_tail: Option<AwsLogTail> = None;
-        let mut ended_at: Option<Instant> = None;
-
-        loop {
-            sleep(Duration::from_secs(1)).await;
-            let result = self
-                .batch_client
-                .describe_jobs()
-                .jobs(job_id.0.clone())
-                .send()
-                .await
-                .map_err(|e| CloudError::Provider(e.into()))?;
-
-            let job_detail = &result.jobs()[0];
-            let status = job_detail.status().unwrap().to_owned();
-            if last_status != Some(status.clone()) {
-                info!(cloud_job_id = ?job_id.0, "Job status changed to {status}");
-                last_status = Some(status);
-            }
-
-            // Fetch logs before potentially exiting if the job has stopped
-            if let Some(log_tail) = &mut log_tail {
-                match log_tail.more_log_events().await {
-                    Ok(Some(events)) => {
-                        for message in events {
-                            println!("    {message}");
-                        }
-                    }
-                    Ok(None) => {
-                        info!("End of log stream");
-                    }
-                    Err(e) => {
-                        error!("Error fetching log events: {}", e);
-                        // Keep polling anyhow
-                    }
-                }
-            }
-
-            match job_detail.status().unwrap() {
-                _ if ended_at.is_some() => {}
-                JobStatus::Succeeded => {
-                    info!("Job succeeded!");
-                    ended_at = Some(Instant::now());
-                }
-                JobStatus::Failed => {
-                    error!("Job failed!");
-                    ended_at = Some(Instant::now());
-                }
-                JobStatus::Running => {
-                    // Job is running
-                }
-                _ => continue,
-            }
-
-            let ecs_properties = job_detail.ecs_properties().unwrap();
-            assert_eq!(
-                ecs_properties.task_properties().len(),
-                1,
-                "Expected exactly one task"
-            );
-            let container_properties = &ecs_properties.task_properties()[0].containers()[0];
-            if let Some(log_stream_name) = container_properties.log_stream_name() {
-                match log_tail {
-                    None => {
-                        info!("Starting log tail for stream {log_stream_name}");
-                        let log_group_arn = format!(
-                            "arn:aws:logs:{}:{}:log-group:{}",
-                            self.sdk_config.region().unwrap(),
-                            self.account_id,
-                            self.suite.config.aws_log_group_name
-                        );
-                        log_tail = Some(
-                            AwsLogTail::new(&self.sdk_config, &log_group_arn, log_stream_name)
-                                .await,
-                        );
-                    }
-                    Some(ref tail) => assert_eq!(tail.log_stream_name, log_stream_name),
-                }
-            }
-
-            if ended_at.is_some_and(|e| e.elapsed().as_millis() > 2000) {
-                break;
-            }
-        }
-
-        Ok(())
+    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription, CloudError> {
+        let description = self
+            .batch_client
+            .describe_jobs()
+            .jobs(job_id.0.clone())
+            .send()
+            .await
+            .map_err(|e| {
+                error!("Describe job failed: {}", e);
+                CloudError::Provider(e.into())
+            })?;
+        let ecs_properties = description.jobs()[0]
+            .ecs_properties()
+            .expect("ecs_properties");
+        assert_eq!(
+            ecs_properties.task_properties().len(),
+            1,
+            "Expected exactly one task"
+        );
+        let container_properties = &ecs_properties.task_properties()[0].containers()[0];
+        let log_stream_name = container_properties
+            .log_stream_name()
+            .map(ToOwned::to_owned);
+        Ok(JobDescription {
+            job_id: job_id.clone(),
+            status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
+            log_stream_name,
+        })
     }
 
     async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError> {
@@ -307,13 +248,121 @@ impl Cloud for AwsCloud {
         Ok(output_tarball_path)
     }
 
-    async fn log_tail(&self, job_id: &CloudJobId) -> Result<Box<dyn LogTail>, CloudError> {
+    async fn tail_log(
+        &self,
+        job_description: &JobDescription,
+    ) -> Result<Box<dyn LogTail>, CloudError> {
+        // TODO: Maybe return None if the description doesn't have a log stream name yet?
         let log_tail = AwsLogTail::new(
-            &self.sdk_config,
+            self,
             &self.suite.config.aws_log_group_name,
-            &job_id.0,
+            job_description.log_stream_name.as_ref().unwrap(),
         )
         .await;
         Ok(Box::new(log_tail))
     }
+}
+
+impl From<AwsJobStatus> for JobStatus {
+    fn from(status: AwsJobStatus) -> Self {
+        match status {
+            // A constraint here is that the log stream will only exist once the job becomes Running
+            // so we treat everything else as pending.
+            AwsJobStatus::Pending
+            | AwsJobStatus::Runnable
+            | AwsJobStatus::Submitted
+            | AwsJobStatus::Starting => JobStatus::Pending,
+            AwsJobStatus::Running => JobStatus::Running,
+            AwsJobStatus::Succeeded => JobStatus::Completed,
+            AwsJobStatus::Failed => JobStatus::Failed,
+            _ => JobStatus::Unknown,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AwsLogTail {
+    #[allow(dead_code)] // just for debugging?
+    pub log_stream_name: String,
+    response_stream: EventReceiver<StartLiveTailResponseStream, StartLiveTailResponseStreamError>,
+}
+
+impl AwsLogTail {
+    pub(crate) async fn new(
+        aws_cloud: &AwsCloud,
+        log_group_name: &str,
+        log_stream_name: &str,
+    ) -> Self {
+        assert_ne!(log_stream_name, "");
+        assert_ne!(log_group_name, "");
+        let log_group_arn = log_group_arn(aws_cloud, log_group_name);
+        // TODO: Might need to renew the tail after it times out, after 3h.
+        debug!(?log_stream_name, ?log_group_arn, "Starting live tail");
+        let live_tail = aws_cloud
+            .logs_client
+            .start_live_tail()
+            .log_group_identifiers(log_group_arn.to_owned()) // TODO: Maybe should be the ARN?
+            .log_stream_names(log_stream_name.to_owned())
+            .send()
+            .await
+            .unwrap();
+        let response_stream = live_tail.response_stream;
+
+        AwsLogTail {
+            // logs_client,
+            // log_group_name: log_group_name.to_string(),
+            log_stream_name: log_stream_name.to_string(),
+            response_stream,
+        }
+    }
+}
+
+#[async_trait]
+impl crate::cloud::LogTail for AwsLogTail {
+    /// Get one page of log events.
+    // TODO: Maybe return message times too?
+    async fn more_log_events(&mut self) -> Result<Option<Vec<String>>, CloudError> {
+        // info!("Fetching log events from CloudWatch Logs");
+        loop {
+            match self.response_stream.recv().await {
+                Ok(None) => {
+                    info!("Log stream ended");
+                    return Ok(None);
+                }
+                Ok(Some(StartLiveTailResponseStream::SessionStart(start))) => {
+                    debug!(?start, "Starting live tailing");
+                    continue;
+                }
+                Ok(Some(StartLiveTailResponseStream::SessionUpdate(update))) => {
+                    if update.session_metadata().is_some_and(|m| m.sampled) {
+                        warn!(?update, "Logs were sampled");
+                    }
+                    return Ok(Some(
+                        update
+                            .session_results()
+                            .iter()
+                            .filter_map(|e| e.message.clone())
+                            .collect(),
+                    ));
+                }
+                Ok(Some(unknown)) => {
+                    warn!(?unknown, "Unknown live tailing response");
+                    continue;
+                }
+                Err(err) => {
+                    error!("Error fetching log events: {}", err);
+                    return Err(CloudError::Provider(err.into()));
+                }
+            }
+        }
+    }
+}
+
+fn log_group_arn(aws_cloud: &AwsCloud, log_group_name: &str) -> String {
+    format!(
+        "arn:aws:logs:{}:{}:log-group:{}",
+        aws_cloud.sdk_config.region().unwrap(),
+        aws_cloud.account_id,
+        log_group_name
+    )
 }

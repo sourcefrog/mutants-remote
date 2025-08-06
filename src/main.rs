@@ -1,17 +1,20 @@
 //! Launch cargo-mutants into AWS Batch jobs.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{env::temp_dir, fs::File};
 
 use clap::{Parser, Subcommand};
 use thiserror::Error;
 use tokio::process::Command;
+use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
 use tracing::{error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
 use crate::cloud::{Cloud, aws::AwsCloud};
+use crate::cloud::{CloudJobId, JobStatus};
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -142,10 +145,13 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     };
 
     // Monitor job
-    if let Err(err) = cloud.monitor_job(&job_id).await {
-        error!("Failed to monitor job: {err}");
-        return Err(Error::Cloud(err));
-    }
+    let _final_status = match monitor_job(&cloud, &job_id).await {
+        Ok(status) => status,
+        Err(err) => {
+            error!("Failed to monitor job: {err}");
+            return Err(err);
+        }
+    };
 
     // Fetch output
     match cloud.fetch_output(&job_id).await {
@@ -162,6 +168,50 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus, Error> {
+    let mut last_status: Option<JobStatus> = None;
+    let mut log_tail = None;
+    let mut _logs_ended = false;
+    loop {
+        let job_description = cloud.describe_job(job_id).await?;
+        let status = job_description.status;
+        if last_status != Some(status) {
+            info!(?job_id, "Job status changed to {status}");
+            last_status = Some(job_description.status);
+        }
+        match job_description.status {
+            JobStatus::Completed | JobStatus::Failed => {
+                // TODO: Maybe wait just a little longer for the last logs? But, we don't seem to reliably detect the end of the logs.
+                return Ok(job_description.status);
+            }
+            JobStatus::Running => {
+                if log_tail.is_none() && job_description.log_stream_name.is_some() {
+                    log_tail = Some(cloud.tail_log(&job_description).await?);
+                }
+            }
+            _ => {}
+        }
+        if let Some(log_tail) = &mut log_tail {
+            match log_tail.more_log_events().await {
+                Ok(Some(events)) => {
+                    for message in events {
+                        println!("    {message}");
+                    }
+                }
+                Ok(None) => {
+                    info!("End of log stream");
+                    _logs_ended = true;
+                }
+                Err(e) => {
+                    error!("Error fetching log events: {}", e);
+                    // logs_ended here? unclear.
+                }
+            }
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
 }
 
 /// Tar up the source directory and return the temporary path to the tarball.

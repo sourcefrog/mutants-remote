@@ -21,19 +21,43 @@ pub enum CloudError {
     Io(#[from] std::io::Error),
 }
 
-/// Abstraction of a cloud provider that can launch jobs, monitor them, and fetch their output, etc.
+/// Abstraction of a cloud provider that can launch jobs, read their status,
+/// fetch their logs or output tarball, etc.
 #[async_trait]
 pub trait Cloud {
     async fn upload_source_tarball(&self, source_tarball: &Path) -> Result<(), CloudError>;
     async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError>;
-    async fn monitor_job(&self, job_id: &CloudJobId) -> Result<(), CloudError>;
     async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError>;
-    async fn log_tail(&self, job_id: &CloudJobId) -> Result<Box<dyn LogTail>, CloudError>;
+    async fn tail_log(
+        &self,
+        job_description: &JobDescription,
+    ) -> Result<Box<dyn LogTail>, CloudError>;
+    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription, CloudError>;
 }
 
 /// The identifier for a job assigned by the cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloudJobId(String);
+
+/// Describes the status of a job.
+#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
+pub enum JobStatus {
+    // TODO: Maybe include a string for the more-detailed cloud status? Or just map them all into this?
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JobDescription {
+    pub job_id: CloudJobId,
+    pub status: JobStatus,
+    /// Cloud-specific identifier of the log stream for this job, if it's known.
+    // (This might later need to be generalized for other clouds?)
+    pub log_stream_name: Option<String>,
+}
 
 /// Abstract trait to tail logs from a single job running on a cloud.
 #[async_trait]
