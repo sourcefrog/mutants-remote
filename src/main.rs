@@ -11,8 +11,7 @@ use tracing::{error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
-mod log_tail;
-use crate::cloud::{AwsCloud, Cloud};
+use crate::cloud::{Cloud, aws::AwsCloud};
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
