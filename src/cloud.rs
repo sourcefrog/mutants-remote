@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::JobStatus;
+
 static SUITE_ID_TAG: &str = "mutants-remote-suite";
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
@@ -38,17 +40,6 @@ pub trait Cloud {
 /// The identifier for a job assigned by the cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloudJobId(String);
-
-/// Describes the status of a job.
-#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
-pub enum JobStatus {
-    // TODO: Maybe include a string for the more-detailed cloud status? Or just map them all into this?
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Unknown,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JobDescription {

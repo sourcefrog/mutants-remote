@@ -13,8 +13,7 @@ use tracing::{error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
-use crate::cloud::{Cloud, aws::AwsCloud};
-use crate::cloud::{CloudJobId, JobStatus};
+use crate::cloud::{Cloud, CloudJobId, aws::AwsCloud};
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -79,6 +78,20 @@ pub struct Config {
     pub aws_batch_job_queue: String,
     pub aws_batch_job_definition: String,
     pub aws_log_group_name: String,
+}
+
+/// Describes the status of a job.
+#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
+pub enum JobStatus {
+    Submitted,
+    Pending,
+    Starting,
+    Runnable,
+    Running,
+    Completed,
+    Stopping,
+    Failed,
+    Unknown,
 }
 
 #[tokio::main]

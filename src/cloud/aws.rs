@@ -15,8 +15,8 @@ use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudError, CloudJobId, JobDescription, JobStatus, LogTail, SUITE_ID_TAG};
-use crate::{SOURCE_TARBALL_NAME, Suite, TOOL_NAME};
+use super::{Cloud, CloudError, CloudJobId, JobDescription, LogTail, SUITE_ID_TAG};
+use crate::{JobStatus, SOURCE_TARBALL_NAME, Suite, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,
@@ -268,10 +268,10 @@ impl From<AwsJobStatus> for JobStatus {
         match status {
             // A constraint here is that the log stream will only exist once the job becomes Running
             // so we treat everything else as pending.
-            AwsJobStatus::Pending
-            | AwsJobStatus::Runnable
-            | AwsJobStatus::Submitted
-            | AwsJobStatus::Starting => JobStatus::Pending,
+            AwsJobStatus::Pending => JobStatus::Pending,
+            AwsJobStatus::Runnable => JobStatus::Runnable,
+            AwsJobStatus::Submitted => JobStatus::Submitted,
+            AwsJobStatus::Starting => JobStatus::Starting,
             AwsJobStatus::Running => JobStatus::Running,
             AwsJobStatus::Succeeded => JobStatus::Completed,
             AwsJobStatus::Failed => JobStatus::Failed,
@@ -281,18 +281,14 @@ impl From<AwsJobStatus> for JobStatus {
 }
 
 #[derive(Debug)]
-pub(crate) struct AwsLogTail {
+struct AwsLogTail {
     #[allow(dead_code)] // just for debugging?
     pub log_stream_name: String,
     response_stream: EventReceiver<StartLiveTailResponseStream, StartLiveTailResponseStreamError>,
 }
 
 impl AwsLogTail {
-    pub(crate) async fn new(
-        aws_cloud: &AwsCloud,
-        log_group_name: &str,
-        log_stream_name: &str,
-    ) -> Self {
+    async fn new(aws_cloud: &AwsCloud, log_group_name: &str, log_stream_name: &str) -> Self {
         assert_ne!(log_stream_name, "");
         assert_ne!(log_group_name, "");
         let log_group_arn = log_group_arn(aws_cloud, log_group_name);
