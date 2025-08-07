@@ -48,6 +48,7 @@ pub struct JobDescription {
     /// Cloud-specific identifier of the log stream for this job, if it's known.
     // (This might later need to be generalized for other clouds?)
     pub log_stream_name: Option<String>,
+    // TODO: The suite id and shard number, extracted from tags on the job.
 }
 
 /// Abstract trait to tail logs from a single job running on a cloud.

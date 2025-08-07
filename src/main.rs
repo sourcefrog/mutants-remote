@@ -41,7 +41,7 @@ enum Commands {
         source: PathBuf,
 
         /// Total number of shards
-        #[arg(long, default_value = "100")]
+        #[arg(long, default_value = "10")]
         shards: u32,
     },
 }
@@ -148,7 +148,7 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
 
     // Submit job
     let shard_k = 0;
-    let script = format!("cargo mutants --shard {shard_k}/{shards} -vV || true");
+    let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
     let job_name = format!(
         "{TOOL_NAME}-{suite_id}-shard-{shard_k}",
         suite_id = suite.suite_id
