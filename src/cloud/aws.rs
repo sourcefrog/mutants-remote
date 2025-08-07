@@ -1,3 +1,5 @@
+// Copyright 2025 Martin Pool
+
 //! AWS Batch implementation of the Cloud abstraction.
 
 use std::path::{Path, PathBuf};
@@ -15,8 +17,8 @@ use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudError, CloudJobId, JobDescription, LogTail, SUITE_ID_TAG};
-use crate::{JobStatus, SOURCE_TARBALL_NAME, Suite, TOOL_NAME};
+use super::{Cloud, CloudError, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
+use crate::{JobStatus, RunParams, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,
@@ -24,13 +26,13 @@ pub struct AwsCloud {
     batch_client: aws_sdk_batch::Client,
     s3_client: aws_sdk_s3::Client,
     logs_client: aws_sdk_cloudwatchlogs::Client,
-    /// Description of the suite being run.
+    /// Description of the run being run.
     // TODO: Does this really belong in the cloud or should it be passed in to methods?
-    suite: Suite,
+    run_params: RunParams,
 }
 
 impl AwsCloud {
-    pub async fn new(suite: Suite) -> Result<Self, CloudError> {
+    pub async fn new(run_params: RunParams) -> Result<Self, CloudError> {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
@@ -64,12 +66,12 @@ impl AwsCloud {
             batch_client,
             s3_client,
             logs_client,
-            suite,
+            run_params,
         })
     }
 
     fn s3_key_prefix(&self) -> String {
-        format!("{TOOL_NAME}/{suite_id}", suite_id = self.suite.suite_id)
+        format!("{TOOL_NAME}/{run_id}", run_id = self.run_params.run_id)
     }
 
     fn source_tarball_key(&self) -> String {
@@ -79,7 +81,7 @@ impl AwsCloud {
     fn source_tarball_s3_url(&self) -> String {
         format!(
             "s3://{}/{}",
-            self.suite.config.aws_s3_bucket,
+            self.run_params.config.aws_s3_bucket,
             self.source_tarball_key()
         )
     }
@@ -91,7 +93,7 @@ impl AwsCloud {
     fn output_tarball_s3_url(&self) -> String {
         format!(
             "s3://{}/{}",
-            self.suite.config.aws_s3_bucket,
+            self.run_params.config.aws_s3_bucket,
             self.output_tarball_key()
         )
     }
@@ -106,10 +108,10 @@ impl Cloud for AwsCloud {
             .map_err(|e| CloudError::Provider(e.into()))?;
         self.s3_client
             .put_object()
-            .bucket(&self.suite.config.aws_s3_bucket)
+            .bucket(&self.run_params.config.aws_s3_bucket)
             .key(self.source_tarball_key())
             .body(source_tarball_body)
-            .tagging(format!("{SUITE_ID_TAG}={}", self.suite.suite_id))
+            .tagging(format!("{RUN_ID_TAG}={}", self.run_params.run_id))
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
@@ -119,7 +121,7 @@ impl Cloud for AwsCloud {
     async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
-        let script_key = format!("{}/script.sh", self.suite.suite_id);
+        let script_key = format!("{}/script.sh", self.run_params.run_id);
         let output_tarball_url = self.output_tarball_s3_url();
 
         let wrapped_script = format!(
@@ -139,16 +141,16 @@ impl Cloud for AwsCloud {
         self.s3_client
             .put_object()
             .key(script_key.clone())
-            .tagging(format!("{SUITE_ID_TAG}={}", self.suite.suite_id))
+            .tagging(format!("{RUN_ID_TAG}={}", self.run_params.run_id))
             .body(ByteStream::from(Bytes::from(wrapped_script)))
-            .bucket(&self.suite.config.aws_s3_bucket)
+            .bucket(&self.run_params.config.aws_s3_bucket)
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
-        let script_key = format!("{}/script.sh", self.suite.suite_id);
+        let script_key = format!("{}/script.sh", self.run_params.run_id);
         let script_s3_url = format!(
             "s3://{bucket}/{script_key}",
-            bucket = self.suite.config.aws_s3_bucket,
+            bucket = self.run_params.config.aws_s3_bucket,
         );
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
@@ -178,9 +180,9 @@ impl Cloud for AwsCloud {
             .batch_client
             .submit_job()
             .job_name(job_name)
-            .job_queue(&self.suite.config.aws_batch_job_queue)
-            .job_definition(&self.suite.config.aws_batch_job_definition)
-            .tags(SUITE_ID_TAG, self.suite.suite_id.to_string())
+            .job_queue(&self.run_params.config.aws_batch_job_queue)
+            .job_definition(&self.run_params.config.aws_batch_job_definition)
+            .tags(RUN_ID_TAG, self.run_params.run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
             .send()
@@ -203,6 +205,7 @@ impl Cloud for AwsCloud {
                 error!("Describe job failed: {}", e);
                 CloudError::Provider(e.into())
             })?;
+        debug!(?job_id, ?description, "Job description");
         let ecs_properties = description.jobs()[0]
             .ecs_properties()
             .expect("ecs_properties");
@@ -228,15 +231,15 @@ impl Cloud for AwsCloud {
         let output_tarball = self
             .s3_client
             .get_object()
-            .bucket(&self.suite.config.aws_s3_bucket)
+            .bucket(&self.run_params.config.aws_s3_bucket)
             .key(&output_tarball_key)
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
 
         let output_tarball_path = std::env::temp_dir().join(format!(
-            "mutants-remote-output-{suite_id}-{job_id}.tar.zstd",
-            suite_id = self.suite.suite_id,
+            "mutants-remote-output-{run_id}-{job_id}.tar.zstd",
+            run_id = self.run_params.run_id,
             job_id = job_id.0
         ));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
@@ -255,7 +258,7 @@ impl Cloud for AwsCloud {
         // TODO: Maybe return None if the description doesn't have a log stream name yet?
         let log_tail = AwsLogTail::new(
             self,
-            &self.suite.config.aws_log_group_name,
+            &self.run_params.config.aws_log_group_name,
             job_description.log_stream_name.as_ref().unwrap(),
         )
         .await;

@@ -4,9 +4,10 @@
 //!
 //! # Concepts
 //!
-//! One "suite" is a single run of cargo-mutants with a single source directory and configuration.
-//! The suite may be split into multiple shards to run in parallel, each of which is a single remote job.
-//! All the jobs in a suite are tagged with the suite ID.
+//! One "run" corresponds to testing all the selected mutants in one tree, and is launched
+//! by `mutants-remote run`.
+//!
+//! In future, one run may be split into multiple jobs, each of which runs a shard of mutants.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -37,7 +38,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run a mutants test suite
+    /// Remotely test cargo-mutants on a source directory
     Run {
         /// Source directory to run mutants on
         #[arg(long, short = 'd')]
@@ -73,10 +74,10 @@ pub enum Error {
     // Config(String),
 }
 
-/// A general description of the suite to run, including the config.
+/// Parameters for a run.
 #[derive(Debug, Clone)]
-pub struct Suite {
-    pub suite_id: String,
+pub struct RunParams {
+    pub run_id: String,
     pub config: Config,
 }
 
@@ -114,8 +115,8 @@ async fn main() -> Result<(), Error> {
 }
 
 async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
-    let suite_id = suite_id();
-    setup_tracing(&suite_id);
+    let run_id = run_id();
+    setup_tracing(&run_id);
 
     // Create job configuration
     let config = Config {
@@ -124,13 +125,13 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
         aws_batch_job_definition: "mutants0-amd64".to_string(),
         aws_log_group_name: "/aws/batch/job".to_string(),
     };
-    let suite = Suite {
-        suite_id: suite_id.clone(),
+    let run_params = RunParams {
+        run_id: run_id.clone(),
         config,
     };
 
     // Create AWS cloud provider
-    let cloud = match AwsCloud::new(suite.clone()).await {
+    let cloud = match AwsCloud::new(run_params.clone()).await {
         Ok(cloud) => cloud,
         Err(err) => {
             error!("Failed to initialize AWS cloud: {err}");
@@ -153,11 +154,11 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     let shard_k = 0;
     let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
     let job_name = format!(
-        "{TOOL_NAME}-{suite_id}-shard-{shard_k}",
-        suite_id = suite.suite_id
+        "{TOOL_NAME}-{run_id}-shard-{shard_k}",
+        run_id = run_params.run_id
     );
     // TODO: Maybe pass in the shard_k and shard_n to be used as tags?
-    info!(?suite_id, ?job_name, "Submitting job");
+    info!(?run_id, ?job_name, "Submitting job");
     let job_id = match cloud.submit_job(script, job_name).await {
         Ok(id) => id,
         Err(err) => {
@@ -289,7 +290,8 @@ fn setup_tracing(suite_id: &str) {
     info!("Tracing initialized to file {}", log_path.display());
 }
 
-fn suite_id() -> String {
+/// Generate a unique ID for a run.
+fn run_id() -> String {
     let now = OffsetDateTime::now_utc();
     let time_str = now
         .format(format_description!(

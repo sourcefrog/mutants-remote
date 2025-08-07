@@ -9,7 +9,10 @@ use thiserror::Error;
 
 use crate::JobStatus;
 
-static SUITE_ID_TAG: &str = "mutants-remote-suite";
+/// The name of a tag identifying a run, attached to jobs and other resources created for the run.
+///
+/// The value of the tag is the run ID.
+static RUN_ID_TAG: &str = "mutants-remote-run";
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
 pub mod aws;
@@ -48,7 +51,7 @@ pub struct JobDescription {
     /// Cloud-specific identifier of the log stream for this job, if it's known.
     // (This might later need to be generalized for other clouds?)
     pub log_stream_name: Option<String>,
-    // TODO: The suite id and shard number, extracted from tags on the job.
+    // TODO: The run id and shard number, extracted from tags on the job.
 }
 
 /// Abstract trait to tail logs from a single job running on a cloud.
