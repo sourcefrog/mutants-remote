@@ -74,13 +74,6 @@ pub enum Error {
     // Config(String),
 }
 
-/// Parameters for a run.
-#[derive(Debug, Clone)]
-pub struct RunParams {
-    pub run_id: String,
-    pub config: Config,
-}
-
 /// User-provided configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -104,6 +97,18 @@ pub enum JobStatus {
     Unknown,
 }
 
+/// Identifier assigned by us to a run.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RunId(String);
+
+/// Name assigned by us to a job within a run, including the run id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JobName {
+    run_id: RunId,
+    // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
+    shard_k: u32,
+}
+
 #[tokio::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), Error> {
@@ -115,7 +120,7 @@ async fn main() -> Result<(), Error> {
 }
 
 async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
-    let run_id = run_id();
+    let run_id = RunId::new();
     setup_tracing(&run_id);
 
     // Create job configuration
@@ -125,13 +130,9 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
         aws_batch_job_definition: "mutants0-amd64".to_string(),
         aws_log_group_name: "/aws/batch/job".to_string(),
     };
-    let run_params = RunParams {
-        run_id: run_id.clone(),
-        config,
-    };
 
     // Create AWS cloud provider
-    let cloud = match AwsCloud::new(run_params.clone()).await {
+    let cloud = match AwsCloud::new(config.clone()).await {
         Ok(cloud) => cloud,
         Err(err) => {
             error!("Failed to initialize AWS cloud: {err}");
@@ -139,8 +140,11 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
         }
     };
 
-    let source_tarball = tar_source(&source_dir).await?;
-    match cloud.upload_source_tarball(&source_tarball).await {
+    let source_tarball_path = tar_source(&source_dir).await?;
+    match cloud
+        .upload_source_tarball(&run_id, &source_tarball_path)
+        .await
+    {
         Ok(()) => {}
         Err(err) => {
             error!("Failed to upload source tarball: {err}");
@@ -153,13 +157,12 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     // Submit job
     let shard_k = 0;
     let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
-    let job_name = format!(
-        "{TOOL_NAME}-{run_id}-shard-{shard_k}",
-        run_id = run_params.run_id
-    );
-    // TODO: Maybe pass in the shard_k and shard_n to be used as tags?
-    info!(?run_id, ?job_name, "Submitting job");
-    let job_id = match cloud.submit_job(script, job_name).await {
+    let job_name = JobName {
+        run_id: run_id.clone(),
+        shard_k,
+    };
+    info!(?job_name, "Submitting job");
+    let job_id = match cloud.submit_job(&job_name, script).await {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to submit job: {err}");
@@ -177,7 +180,7 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     };
 
     // Fetch output
-    match cloud.fetch_output(&job_id).await {
+    match cloud.fetch_output(&job_name).await {
         Ok(output_path) => {
             info!(
                 "Job completed successfully. Output available at: {}",
@@ -262,8 +265,8 @@ async fn tar_source(source: &Path) -> Result<PathBuf, Error> {
     Ok(tarball_path)
 }
 
-fn setup_tracing(suite_id: &str) {
-    let log_path = temp_dir().join(format!("{TOOL_NAME}-{suite_id}.log"));
+fn setup_tracing(run_id: &RunId) {
+    let log_path = temp_dir().join(format!("{TOOL_NAME}-{}.log", run_id.0));
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)
@@ -290,17 +293,31 @@ fn setup_tracing(suite_id: &str) {
     info!("Tracing initialized to file {}", log_path.display());
 }
 
-/// Generate a unique ID for a run.
-fn run_id() -> String {
-    let now = OffsetDateTime::now_utc();
-    let time_str = now
-        .format(format_description!(
-            "[year][month][day][hour][minute][second]"
+impl RunId {
+    /// Generate a unique ID for a run.
+    fn new() -> RunId {
+        let now = OffsetDateTime::now_utc();
+        let time_str = now
+            .format(format_description!(
+                "[year][month][day][hour][minute][second]"
+            ))
+            .unwrap();
+        RunId(format!(
+            "{time}-{random:04x}",
+            time = time_str,
+            random = fastrand::u16(..)
         ))
-        .unwrap();
-    format!(
-        "{time}-{random:04x}",
-        time = time_str,
-        random = fastrand::u16(..)
-    )
+    }
+}
+
+impl std::fmt::Display for RunId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Display for JobName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-shard-{}", self.run_id, self.shard_k)
+    }
 }

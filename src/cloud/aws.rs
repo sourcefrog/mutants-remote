@@ -18,7 +18,7 @@ use bytes::Bytes;
 use tracing::{debug, error, info, warn};
 
 use super::{Cloud, CloudError, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
-use crate::{JobStatus, RunParams, SOURCE_TARBALL_NAME, TOOL_NAME};
+use crate::{JobName, JobStatus, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,
@@ -26,13 +26,11 @@ pub struct AwsCloud {
     batch_client: aws_sdk_batch::Client,
     s3_client: aws_sdk_s3::Client,
     logs_client: aws_sdk_cloudwatchlogs::Client,
-    /// Description of the run being run.
-    // TODO: Does this really belong in the cloud or should it be passed in to methods?
-    run_params: RunParams,
+    config: crate::Config,
 }
 
 impl AwsCloud {
-    pub async fn new(run_params: RunParams) -> Result<Self, CloudError> {
+    pub async fn new(config: crate::Config) -> Result<Self, CloudError> {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
@@ -66,63 +64,84 @@ impl AwsCloud {
             batch_client,
             s3_client,
             logs_client,
-            run_params,
+            config,
         })
     }
 
-    fn s3_key_prefix(&self) -> String {
-        format!("{TOOL_NAME}/{run_id}", run_id = self.run_params.run_id)
+    /// Return the URL for an object inside the configured S3 bucket.
+    fn s3_url(&self, key: &str) -> String {
+        format!("s3://{}/{}", self.config.aws_s3_bucket, key)
     }
 
-    fn source_tarball_key(&self) -> String {
-        format!("{}/{}", self.s3_key_prefix(), SOURCE_TARBALL_NAME)
+    fn run_prefix(&self, run_id: &RunId) -> String {
+        format!("{TOOL_NAME}/{run_id}")
     }
 
-    fn source_tarball_s3_url(&self) -> String {
+    fn job_name_prefix(&self, job_name: &JobName) -> String {
         format!(
-            "s3://{}/{}",
-            self.run_params.config.aws_s3_bucket,
-            self.source_tarball_key()
+            "{TOOL_NAME}/{run_id}/shard-{shard_k}",
+            run_id = job_name.run_id,
+            shard_k = job_name.shard_k
         )
     }
 
-    fn output_tarball_key(&self) -> String {
-        format!("{}/{}", self.s3_key_prefix(), super::OUTPUT_TARBALL_NAME)
+    fn source_tarball_key(&self, run_id: &RunId) -> String {
+        format!("{}/{}", self.run_prefix(run_id), SOURCE_TARBALL_NAME)
     }
 
-    fn output_tarball_s3_url(&self) -> String {
+    fn source_tarball_s3_url(&self, run_id: &RunId) -> String {
+        self.s3_url(&self.source_tarball_key(run_id))
+    }
+
+    /// The S3 key for the output tarball for a job.
+    fn output_tarball_key(&self, job_name: &JobName) -> String {
         format!(
-            "s3://{}/{}",
-            self.run_params.config.aws_s3_bucket,
-            self.output_tarball_key()
+            "{}/{}",
+            self.job_name_prefix(job_name),
+            super::OUTPUT_TARBALL_NAME
         )
+    }
+
+    /// The S3 URL for the output tarball for a job.
+    fn output_tarball_s3_url(&self, job_name: &JobName) -> String {
+        self.s3_url(&self.output_tarball_key(job_name))
     }
 }
 
 #[async_trait]
 impl Cloud for AwsCloud {
-    async fn upload_source_tarball(&self, source_tarball: &Path) -> Result<(), CloudError> {
+    async fn upload_source_tarball(
+        &self,
+        run_id: &RunId,
+        source_tarball: &Path,
+    ) -> Result<(), CloudError> {
         debug!("Uploading source tarball to S3");
         let source_tarball_body = ByteStream::from_path(source_tarball)
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
         self.s3_client
             .put_object()
-            .bucket(&self.run_params.config.aws_s3_bucket)
-            .key(self.source_tarball_key())
+            .bucket(&self.config.aws_s3_bucket)
+            .key(self.source_tarball_key(run_id))
             .body(source_tarball_body)
-            .tagging(format!("{RUN_ID_TAG}={}", self.run_params.run_id))
+            .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
         Ok(())
     }
 
-    async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError> {
+    async fn submit_job(
+        &self,
+        job_name: &JobName,
+        script: String,
+    ) -> Result<CloudJobId, CloudError> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
-        let script_key = format!("{}/script.sh", self.run_params.run_id);
-        let output_tarball_url = self.output_tarball_s3_url();
+        let run_id = &job_name.run_id;
+        let script_key = format!("{}/script.sh", self.run_prefix(run_id));
+        let source_tarball_s3_url = self.source_tarball_s3_url(run_id);
+        let output_tarball_url = self.output_tarball_s3_url(job_name);
 
         let wrapped_script = format!(
             "
@@ -134,24 +153,18 @@ impl Cloud for AwsCloud {
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
-            source_tarball_s3_url = self.source_tarball_s3_url(),
-            output_tarball_url = output_tarball_url,
         );
 
         self.s3_client
             .put_object()
             .key(script_key.clone())
-            .tagging(format!("{RUN_ID_TAG}={}", self.run_params.run_id))
+            .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .body(ByteStream::from(Bytes::from(wrapped_script)))
-            .bucket(&self.run_params.config.aws_s3_bucket)
+            .bucket(&self.config.aws_s3_bucket)
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
-        let script_key = format!("{}/script.sh", self.run_params.run_id);
-        let script_s3_url = format!(
-            "s3://{bucket}/{script_key}",
-            bucket = self.run_params.config.aws_s3_bucket,
-        );
+        let script_s3_url = self.s3_url(&script_key);
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
             bash -ex /tmp/script.sh
@@ -179,10 +192,10 @@ impl Cloud for AwsCloud {
         let result = self
             .batch_client
             .submit_job()
-            .job_name(job_name)
-            .job_queue(&self.run_params.config.aws_batch_job_queue)
-            .job_definition(&self.run_params.config.aws_batch_job_definition)
-            .tags(RUN_ID_TAG, self.run_params.run_id.to_string())
+            .job_name(job_name.to_string())
+            .job_queue(&self.config.aws_batch_job_queue)
+            .job_definition(&self.config.aws_batch_job_definition)
+            .tags(RUN_ID_TAG, run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
             .send()
@@ -225,30 +238,27 @@ impl Cloud for AwsCloud {
         })
     }
 
-    async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError> {
-        let output_tarball_key = self.output_tarball_key();
+    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf, CloudError> {
+        let output_tarball_key = self.output_tarball_key(job_name);
 
         let output_tarball = self
             .s3_client
             .get_object()
-            .bucket(&self.run_params.config.aws_s3_bucket)
+            .bucket(&self.config.aws_s3_bucket)
             .key(&output_tarball_key)
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
 
-        let output_tarball_path = std::env::temp_dir().join(format!(
-            "mutants-remote-output-{run_id}-{job_id}.tar.zstd",
-            run_id = self.run_params.run_id,
-            job_id = job_id.0
-        ));
+        let local_output_tarball_path =
+            std::env::temp_dir().join(format!("mutants-remote-output-{job_name}.tar.zstd",));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
-        tokio::fs::write(&output_tarball_path, body)
+        tokio::fs::write(&local_output_tarball_path, body)
             .await
             .map_err(CloudError::Io)?;
-        info!("Output fetched to {}", output_tarball_path.display());
+        info!("Output fetched to {}", local_output_tarball_path.display());
 
-        Ok(output_tarball_path)
+        Ok(local_output_tarball_path)
     }
 
     async fn tail_log(
@@ -258,7 +268,7 @@ impl Cloud for AwsCloud {
         // TODO: Maybe return None if the description doesn't have a log stream name yet?
         let log_tail = AwsLogTail::new(
             self,
-            &self.run_params.config.aws_log_group_name,
+            &self.config.aws_log_group_name,
             job_description.log_stream_name.as_ref().unwrap(),
         )
         .await;

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::JobStatus;
+use crate::{JobName, JobStatus, RunId};
 
 /// The name of a tag identifying a run, attached to jobs and other resources created for the run.
 ///
@@ -30,9 +30,17 @@ pub enum CloudError {
 /// fetch their logs or output tarball, etc.
 #[async_trait]
 pub trait Cloud {
-    async fn upload_source_tarball(&self, source_tarball: &Path) -> Result<(), CloudError>;
-    async fn submit_job(&self, script: String, job_name: String) -> Result<CloudJobId, CloudError>;
-    async fn fetch_output(&self, job_id: &CloudJobId) -> Result<PathBuf, CloudError>;
+    async fn upload_source_tarball(
+        &self,
+        run_id: &RunId,
+        source_tarball: &Path,
+    ) -> Result<(), CloudError>;
+    async fn submit_job(
+        &self,
+        job_name: &JobName,
+        script: String,
+    ) -> Result<CloudJobId, CloudError>;
+    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf, CloudError>;
     async fn tail_log(
         &self,
         job_description: &JobDescription,
@@ -41,6 +49,8 @@ pub trait Cloud {
 }
 
 /// The identifier for a job assigned by the cloud.
+///
+/// By contrast [`crate::JobName`] is the name chosen by us, before submitting the job.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloudJobId(String);
 
