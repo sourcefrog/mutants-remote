@@ -39,6 +39,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Remotely test cargo-mutants on a source directory
+    #[command(alias = "r")]
     Run {
         /// Source directory to run mutants on
         #[arg(long, short = 'd')]
