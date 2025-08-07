@@ -1,3 +1,5 @@
+// Copyright 2025 Martin Pool
+
 //! Launch cargo-mutants into AWS Batch jobs.
 //!
 //! # Concepts
@@ -12,6 +14,7 @@ use std::{env::temp_dir, fs::File};
 
 use clap::{Parser, Subcommand};
 use thiserror::Error;
+use time::{OffsetDateTime, macros::format_description};
 use tokio::process::Command;
 use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
@@ -287,8 +290,12 @@ fn setup_tracing(suite_id: &str) {
 }
 
 fn suite_id() -> String {
-    let now = chrono::Local::now();
-    let time_str = now.format("%Y%m%d%H%M%S").to_string();
+    let now = OffsetDateTime::now_utc();
+    let time_str = now
+        .format(format_description!(
+            "[year][month][day][hour][minute][second]"
+        ))
+        .unwrap();
     format!(
         "{time}-{random:04x}",
         time = time_str,
