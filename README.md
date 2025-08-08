@@ -11,4 +11,12 @@ Before running the tool you must manually create an AWS account with a bucket, b
 
 ## Security
 
-The AWS account used should contain no other resources and be accessible to only a single user. Assume that any write access to the account allows arbitrary code execution within it. As always, be careful not to commit or otherwise leak any credentials.
+This tool runs with permissions to read and write s3, read logs, and manipulate AWS batch jobs, within a single AWS account. 
+
+Assume that any write access to the account allows arbitrary code execution within it. 
+
+The AWS account used should contain no other resources and be accessible to only a single user. 
+
+As always, be careful not to commit or otherwise leak any credentials. Consider using something like `aws-vault` to keep local credentials safe.
+
+This tool has not had second-party security review and may have security related bugs. 
