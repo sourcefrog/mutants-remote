@@ -2,13 +2,19 @@
 
 //! AWS Batch implementation of the Cloud abstraction.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Debug,
+    path::{Path, PathBuf},
+};
 
 use async_trait::async_trait;
 use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
-use aws_sdk_batch::types::{
-    EcsPropertiesOverride, JobStatus as AwsJobStatus, TaskContainerOverrides,
-    TaskPropertiesOverride,
+use aws_sdk_batch::{
+    error::SdkError,
+    types::{
+        EcsPropertiesOverride, JobStatus as AwsJobStatus, TaskContainerOverrides,
+        TaskPropertiesOverride,
+    },
 };
 use aws_sdk_cloudwatchlogs::primitives::event_stream::EventReceiver;
 use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
@@ -257,6 +263,26 @@ impl Cloud for AwsCloud {
         })
     }
 
+    async fn list_jobs(&self) -> Result<Vec<JobDescription>> {
+        // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
+        let stream = self
+            .batch_client
+            .list_jobs()
+            .into_paginator()
+            .items()
+            .send();
+        let summaries = stream.collect::<Vec<_>>().await;
+        let mut jobs = Vec::new();
+        for summary in summaries {
+            let summary = summary?;
+            // To get the tags, which will let us understand what the job is doing, we have to describe the job
+            let cloud_job_id = CloudJobId(summary.job_id.expect("job_id"));
+            let description = self.describe_job(&cloud_job_id).await?;
+            jobs.push(description);
+        }
+        Ok(jobs)
+    }
+
     async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf> {
         let output_tarball_key = self.output_tarball_key(job_name);
 
@@ -390,4 +416,12 @@ fn log_group_arn(aws_cloud: &AwsCloud, log_group_name: &str) -> String {
         aws_cloud.account_id,
         log_group_name
     )
+}
+
+impl<R: Debug + Send + Sync + 'static, E: std::error::Error + Sync + Send + 'static>
+    From<SdkError<E, R>> for Error
+{
+    fn from(err: SdkError<E, R>) -> Self {
+        Error::Cloud(Box::new(err))
+    }
 }

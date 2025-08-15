@@ -25,6 +25,9 @@ pub trait Cloud {
     async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
+
+    /// List all jobs, including queued, running, and completed.
+    async fn list_jobs(&self) -> Result<Vec<JobDescription>>;
 }
 
 /// The identifier for a job assigned by the cloud.
@@ -33,6 +36,7 @@ pub trait Cloud {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloudJobId(String);
 
+/// Description of a job running or queued on a cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JobDescription {
     pub job_id: CloudJobId,
