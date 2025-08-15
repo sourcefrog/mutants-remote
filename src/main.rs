@@ -15,7 +15,6 @@ use std::time::Duration;
 use std::{env::temp_dir, fs::File};
 
 use clap::{Parser, Subcommand};
-use thiserror::Error;
 use time::{OffsetDateTime, macros::format_description};
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -27,6 +26,8 @@ mod cloud;
 use crate::cloud::{Cloud, CloudJobId, aws::AwsCloud};
 mod config;
 use crate::config::Config;
+mod error;
+use crate::error::Error;
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -55,33 +56,6 @@ enum Commands {
         #[arg(long, default_value = "10")]
         shards: u32,
     },
-}
-
-// TODO: Also try `thistermination` to give specific error codes...
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Cloud error: {0}")]
-    Cloud(#[from] cloud::CloudError),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Invalid configuration: {0}")]
-    Config(String),
-
-    #[error("Tar failed: {0}")]
-    Tar(String),
-    // #[allow(dead_code)]
-    // #[error("Job failed with status: {0}")]
-    // JobFailed(String),
-
-    // #[allow(dead_code)]
-    // #[error("Job timed out")]
-    // JobTimeout,
-
-    // #[allow(dead_code)]
-    // #[error("Invalid configuration: {0}")]
-    // Config(String),
 }
 
 type Result<T> = std::result::Result<T, Error>;
