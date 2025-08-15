@@ -1,10 +1,10 @@
 //! Configuration files for mutants-remote.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::Error;
+use crate::{Error, Result};
 
 /// User-provided configuration.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -16,7 +16,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub(crate) fn from_file(config_path: &PathBuf) -> crate::Result<Self> {
+    pub(crate) fn from_file(config_path: &Path) -> Result<Self> {
         let config_str = std::fs::read_to_string(config_path).map_err(|err| {
             Error::Config(format!(
                 "Failed to load config file {}: {err}",
@@ -37,6 +37,7 @@ impl Config {
 mod tests {
     use std::io::Write;
 
+    use assert_matches::assert_matches;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -74,5 +75,18 @@ mod tests {
             Some("my-definition".to_string())
         );
         assert_eq!(config.aws_log_group_name, Some("my-log-group".to_string()));
+    }
+
+    #[test]
+    fn config_from_file_with_errors() {
+        let mut config_tmp = NamedTempFile::new().unwrap();
+        config_tmp.write_all(b" garbage ").unwrap();
+        let err = Config::from_file(config_tmp.path()).unwrap_err();
+        assert_matches!(err, Error::Config(_));
+        let msg = err.to_string();
+        println!("{}", msg);
+        assert!(msg.starts_with("Invalid configuration: Failed to parse config file"));
+        assert!(msg.contains("garbage"));
+        assert!(msg.contains(config_tmp.path().display().to_string().as_str()));
     }
 }
