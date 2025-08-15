@@ -24,6 +24,8 @@ use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
 use crate::cloud::{Cloud, CloudJobId, aws::AwsCloud};
+mod config;
+use crate::config::Config;
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -73,15 +75,6 @@ pub enum Error {
     // #[allow(dead_code)]
     // #[error("Invalid configuration: {0}")]
     // Config(String),
-}
-
-/// User-provided configuration.
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub aws_s3_bucket: String,
-    pub aws_batch_job_queue: String,
-    pub aws_batch_job_definition: String,
-    pub aws_log_group_name: String,
 }
 
 /// Describes the status of a job.
