@@ -10,6 +10,7 @@
 //! In future, one run may be split into multiple jobs, each of which runs a shard of mutants.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::Duration;
 use std::{env::temp_dir, fs::File};
 
@@ -36,6 +37,9 @@ static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -62,6 +66,9 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Invalid configuration: {0}")]
+    Config(String),
+
     #[error("Tar failed: {0}")]
     Tar(String),
     // #[allow(dead_code)]
@@ -76,6 +83,8 @@ pub enum Error {
     // #[error("Invalid configuration: {0}")]
     // Config(String),
 }
+
+type Result<T> = std::result::Result<T, Error>;
 
 /// Describes the status of a job.
 #[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
@@ -105,24 +114,29 @@ pub struct JobName {
 
 #[tokio::main]
 #[allow(clippy::result_large_err)]
-async fn main() -> Result<(), Error> {
+async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    match cli.command {
-        Commands::Run { source, shards } => run_command(source, shards).await,
+    let result = match &cli.command {
+        Commands::Run { source, shards } => run_command(&cli, source, *shards).await,
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            error!("{err}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
+async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
     let run_id = RunId::new();
     setup_tracing(&run_id);
 
-    // Create job configuration
-    let config = Config {
-        aws_s3_bucket: "mutants-tmp-0733-uswest2".to_string(),
-        aws_batch_job_queue: "mutants0-amd64".to_string(),
-        aws_batch_job_definition: "mutants0-amd64".to_string(),
-        aws_log_group_name: "/aws/batch/job".to_string(),
+    let config = if let Some(config_path) = &cli.config {
+        Config::from_file(config_path)?
+    } else {
+        Config::default()
     };
 
     // Create AWS cloud provider
@@ -134,7 +148,7 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
         }
     };
 
-    let source_tarball_path = tar_source(&source_dir).await?;
+    let source_tarball_path = tar_source(source_dir).await?;
     match cloud
         .upload_source_tarball(&run_id, &source_tarball_path)
         .await
@@ -190,7 +204,7 @@ async fn run_command(source_dir: PathBuf, shards: u32) -> Result<(), Error> {
     Ok(())
 }
 
-async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus, Error> {
+async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus> {
     let mut last_status: Option<JobStatus> = None;
     let mut log_tail = None;
     let mut _logs_ended = false;
@@ -238,7 +252,7 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
 }
 
 /// Tar up the source directory and return the temporary path to the tarball.
-async fn tar_source(source: &Path) -> Result<PathBuf, Error> {
+async fn tar_source(source: &Path) -> Result<PathBuf> {
     let temp_dir = temp_dir();
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar")

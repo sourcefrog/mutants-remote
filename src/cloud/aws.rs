@@ -26,7 +26,10 @@ pub struct AwsCloud {
     batch_client: aws_sdk_batch::Client,
     s3_client: aws_sdk_s3::Client,
     logs_client: aws_sdk_cloudwatchlogs::Client,
-    config: crate::Config,
+    s3_bucket_name: String,
+    job_queue_name: String,
+    job_definition_name: String,
+    log_group_name: String,
 }
 
 impl AwsCloud {
@@ -50,6 +53,27 @@ impl AwsCloud {
         let s3_client = aws_sdk_s3::Client::new(&sdk_config);
         let logs_client = aws_sdk_cloudwatchlogs::Client::new(&sdk_config);
 
+        // TODO: Better auto name including the account id.
+        let s3_bucket_name = config
+            .aws_s3_bucket
+            .clone()
+            .unwrap_or("mutants-tmp-0733-uswest2".to_string());
+
+        let job_queue_name = config
+            .aws_batch_job_queue
+            .clone()
+            .unwrap_or("mutants0-amd64".to_string());
+
+        let job_definition_name = config
+            .aws_batch_job_definition
+            .clone()
+            .unwrap_or("mutants0-amd64".to_string());
+
+        let log_group_name = config
+            .aws_log_group_name
+            .clone()
+            .unwrap_or("/aws/batch/job".to_string());
+
         let caller_identity = sts_client
             .get_caller_identity()
             .send()
@@ -64,13 +88,16 @@ impl AwsCloud {
             batch_client,
             s3_client,
             logs_client,
-            config,
+            s3_bucket_name,
+            job_queue_name,
+            job_definition_name,
+            log_group_name,
         })
     }
 
     /// Return the URL for an object inside the configured S3 bucket.
     fn s3_url(&self, key: &str) -> String {
-        format!("s3://{}/{}", self.config.aws_s3_bucket, key)
+        format!("s3://{}/{}", self.s3_bucket_name, key)
     }
 
     fn run_prefix(&self, run_id: &RunId) -> String {
@@ -121,7 +148,7 @@ impl Cloud for AwsCloud {
             .map_err(|e| CloudError::Provider(e.into()))?;
         self.s3_client
             .put_object()
-            .bucket(&self.config.aws_s3_bucket)
+            .bucket(&self.s3_bucket_name)
             .key(self.source_tarball_key(run_id))
             .body(source_tarball_body)
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
@@ -160,7 +187,7 @@ impl Cloud for AwsCloud {
             .key(script_key.clone())
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .body(ByteStream::from(Bytes::from(wrapped_script)))
-            .bucket(&self.config.aws_s3_bucket)
+            .bucket(&self.s3_bucket_name)
             .send()
             .await
             .map_err(|e| CloudError::Provider(e.into()))?;
@@ -193,8 +220,8 @@ impl Cloud for AwsCloud {
             .batch_client
             .submit_job()
             .job_name(job_name.to_string())
-            .job_queue(&self.config.aws_batch_job_queue)
-            .job_definition(&self.config.aws_batch_job_definition)
+            .job_queue(&self.job_queue_name)
+            .job_definition(&self.job_definition_name)
             .tags(RUN_ID_TAG, run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
@@ -244,7 +271,7 @@ impl Cloud for AwsCloud {
         let output_tarball = self
             .s3_client
             .get_object()
-            .bucket(&self.config.aws_s3_bucket)
+            .bucket(&self.s3_bucket_name)
             .key(&output_tarball_key)
             .send()
             .await
@@ -268,7 +295,7 @@ impl Cloud for AwsCloud {
         // TODO: Maybe return None if the description doesn't have a log stream name yet?
         let log_tail = AwsLogTail::new(
             self,
-            &self.config.aws_log_group_name,
+            &self.log_group_name,
             job_description.log_stream_name.as_ref().unwrap(),
         )
         .await;
