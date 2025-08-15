@@ -17,8 +17,8 @@ use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudError, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
-use crate::{JobName, JobStatus, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
+use super::{Cloud, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
+use crate::{Error, JobName, JobStatus, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,
@@ -33,7 +33,7 @@ pub struct AwsCloud {
 }
 
 impl AwsCloud {
-    pub async fn new(config: crate::Config) -> Result<Self, CloudError> {
+    pub async fn new(config: crate::Config) -> Result<Self> {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
@@ -78,7 +78,7 @@ impl AwsCloud {
             .get_caller_identity()
             .send()
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
         let account_id = caller_identity.account().unwrap().to_owned();
         debug!(?account_id);
 
@@ -137,15 +137,11 @@ impl AwsCloud {
 
 #[async_trait]
 impl Cloud for AwsCloud {
-    async fn upload_source_tarball(
-        &self,
-        run_id: &RunId,
-        source_tarball: &Path,
-    ) -> Result<(), CloudError> {
+    async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()> {
         debug!("Uploading source tarball to S3");
         let source_tarball_body = ByteStream::from_path(source_tarball)
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
         self.s3_client
             .put_object()
             .bucket(&self.s3_bucket_name)
@@ -154,15 +150,11 @@ impl Cloud for AwsCloud {
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .send()
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
         Ok(())
     }
 
-    async fn submit_job(
-        &self,
-        job_name: &JobName,
-        script: String,
-    ) -> Result<CloudJobId, CloudError> {
+    async fn submit_job(&self, job_name: &JobName, script: String) -> Result<CloudJobId> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
         let run_id = &job_name.run_id;
@@ -190,7 +182,7 @@ impl Cloud for AwsCloud {
             .bucket(&self.s3_bucket_name)
             .send()
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
         let script_s3_url = self.s3_url(&script_key);
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
@@ -227,14 +219,14 @@ impl Cloud for AwsCloud {
             .ecs_properties_override(ecs_properties_overrides)
             .send()
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
 
         let job_id = result.job_id().unwrap().to_owned();
         info!(?job_id, "Job submitted successfully: {:?}", result);
         Ok(CloudJobId(job_id))
     }
 
-    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription, CloudError> {
+    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription> {
         let description = self
             .batch_client
             .describe_jobs()
@@ -243,7 +235,7 @@ impl Cloud for AwsCloud {
             .await
             .map_err(|e| {
                 error!("Describe job failed: {}", e);
-                CloudError::Provider(e.into())
+                Error::Cloud(e.into())
             })?;
         debug!(?job_id, ?description, "Job description");
         let ecs_properties = description.jobs()[0]
@@ -265,7 +257,7 @@ impl Cloud for AwsCloud {
         })
     }
 
-    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf, CloudError> {
+    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf> {
         let output_tarball_key = self.output_tarball_key(job_name);
 
         let output_tarball = self
@@ -275,23 +267,20 @@ impl Cloud for AwsCloud {
             .key(&output_tarball_key)
             .send()
             .await
-            .map_err(|e| CloudError::Provider(e.into()))?;
+            .map_err(|e| Error::Cloud(e.into()))?;
 
         let local_output_tarball_path =
             std::env::temp_dir().join(format!("mutants-remote-output-{job_name}.tar.zstd",));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&local_output_tarball_path, body)
             .await
-            .map_err(CloudError::Io)?;
+            .map_err(Error::Io)?;
         info!("Output fetched to {}", local_output_tarball_path.display());
 
         Ok(local_output_tarball_path)
     }
 
-    async fn tail_log(
-        &self,
-        job_description: &JobDescription,
-    ) -> Result<Box<dyn LogTail>, CloudError> {
+    async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>> {
         // TODO: Maybe return None if the description doesn't have a log stream name yet?
         let log_tail = AwsLogTail::new(
             self,
@@ -357,7 +346,7 @@ impl AwsLogTail {
 impl crate::cloud::LogTail for AwsLogTail {
     /// Get one page of log events.
     // TODO: Maybe return message times too?
-    async fn more_log_events(&mut self) -> Result<Option<Vec<String>>, CloudError> {
+    async fn more_log_events(&mut self) -> Result<Option<Vec<String>>> {
         // info!("Fetching log events from CloudWatch Logs");
         loop {
             match self.response_stream.recv().await {
@@ -387,7 +376,7 @@ impl crate::cloud::LogTail for AwsLogTail {
                 }
                 Err(err) => {
                     error!("Error fetching log events: {}", err);
-                    return Err(CloudError::Provider(err.into()));
+                    return Err(Error::Cloud(err.into()));
                 }
             }
         }

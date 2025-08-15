@@ -5,9 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use thiserror::Error;
 
-use crate::{JobName, JobStatus, RunId};
+use crate::{JobName, JobStatus, Result, RunId};
 
 /// The name of a tag identifying a run, attached to jobs and other resources created for the run.
 ///
@@ -17,35 +16,15 @@ static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
 pub mod aws;
 
-#[derive(Error, Debug)]
-pub enum CloudError {
-    #[error("Cloud provider error: {0}")]
-    Provider(#[from] Box<dyn std::error::Error>),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-}
-
 /// Abstraction of a cloud provider that can launch jobs, read their status,
 /// fetch their logs or output tarball, etc.
 #[async_trait]
 pub trait Cloud {
-    async fn upload_source_tarball(
-        &self,
-        run_id: &RunId,
-        source_tarball: &Path,
-    ) -> Result<(), CloudError>;
-    async fn submit_job(
-        &self,
-        job_name: &JobName,
-        script: String,
-    ) -> Result<CloudJobId, CloudError>;
-    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf, CloudError>;
-    async fn tail_log(
-        &self,
-        job_description: &JobDescription,
-    ) -> Result<Box<dyn LogTail>, CloudError>;
-    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription, CloudError>;
+    async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()>;
+    async fn submit_job(&self, job_name: &JobName, script: String) -> Result<CloudJobId>;
+    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf>;
+    async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
+    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
 }
 
 /// The identifier for a job assigned by the cloud.
@@ -70,5 +49,5 @@ pub trait LogTail {
     /// Fetch some more log events.
     ///
     /// Returns `Ok(None)` when the log stream has ended.
-    async fn more_log_events(&mut self) -> Result<Option<Vec<String>>, CloudError>;
+    async fn more_log_events(&mut self) -> Result<Option<Vec<String>>>;
 }

@@ -118,7 +118,7 @@ async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
         Ok(cloud) => cloud,
         Err(err) => {
             error!("Failed to initialize AWS cloud: {err}");
-            return Err(Error::Cloud(err));
+            return Err(err);
         }
     };
 
@@ -130,7 +130,7 @@ async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
         Ok(()) => {}
         Err(err) => {
             error!("Failed to upload source tarball: {err}");
-            return Err(Error::Cloud(err));
+            return Err(err);
         }
     }
 
@@ -148,7 +148,7 @@ async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to submit job: {err}");
-            return Err(Error::Cloud(err));
+            return Err(err);
         }
     };
 
@@ -171,7 +171,7 @@ async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
         }
         Err(err) => {
             error!("Failed to fetch output: {err}");
-            return Err(Error::Cloud(err));
+            return Err(err);
         }
     }
 

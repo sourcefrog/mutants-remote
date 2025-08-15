@@ -1,12 +1,10 @@
 use thiserror::Error;
 
-use crate::cloud::CloudError;
-
 // TODO: Also try `thistermination` to give specific error codes...
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Cloud error: {0}")]
-    Cloud(#[from] CloudError),
+    #[error("Cloud provider error: {0}")]
+    Cloud(Box<dyn std::error::Error + Send + Sync>),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
