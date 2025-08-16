@@ -133,6 +133,7 @@ async fn inner_main() -> Result<()> {
 }
 
 struct App {
+    #[allow(dead_code)] // may be used later
     config: Config,
     cloud: Box<dyn Cloud>,
     cli: Cli,
