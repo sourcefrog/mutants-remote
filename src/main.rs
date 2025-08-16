@@ -182,14 +182,22 @@ impl App {
     }
 
     async fn list(&self, verbose: bool) -> Result<()> {
+        // TODO: Aggregate the jobs by run_id and just summarize the run by default?
         let jobs = self.cloud.list_jobs().await?;
         for description in jobs {
             if verbose {
                 println!("{description:#?}");
+            } else if let Some(job_name) = description.job_name {
+                println!(
+                    "Run {run_id} shard {shard_k} status {status}",
+                    run_id = job_name.run_id,
+                    shard_k = job_name.shard_k,
+                    status = description.status
+                );
             } else {
                 println!(
-                    "Job {id} status {status}",
-                    id = description.cloud_job_id,
+                    "Unrecognized job {cloud_job_id} status {status}",
+                    cloud_job_id = description.cloud_job_id,
                     status = description.status
                 );
             }
