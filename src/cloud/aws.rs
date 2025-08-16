@@ -279,11 +279,18 @@ impl Cloud for AwsCloud {
         let log_stream_name = container_properties
             .log_stream_name()
             .map(ToOwned::to_owned);
+        let raw_job_name = job_detail.job_name().map(ToOwned::to_owned);
+        let job_name = raw_job_name.as_ref().and_then(|n| {
+            n.parse()
+                .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
+                .ok()
+        });
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
             log_stream_name,
-            raw_job_name: job_detail.job_name().map(ToOwned::to_owned),
+            raw_job_name,
+            job_name,
         })
     }
 

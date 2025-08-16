@@ -42,6 +42,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
+    /// Path to mutants-remote configuration file.
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 }
@@ -64,6 +65,7 @@ enum Commands {
     #[command(alias = "ls")]
     List {
         // TODO: Options for the queue, cutoff time, other filters?
+        /// List all known fields.
         #[arg(long, short = 'v')]
         verbose: bool,
     },
@@ -313,11 +315,5 @@ impl RunId {
 impl std::fmt::Display for RunId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-impl std::fmt::Display for JobName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-shard-{}", self.run_id, self.shard_k)
     }
 }
