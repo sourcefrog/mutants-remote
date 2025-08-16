@@ -10,7 +10,8 @@ use std::{
 use async_trait::async_trait;
 use tracing::error;
 
-use crate::{JobName, JobStatus, Result, RunId, cloud::aws::AwsCloud, config::Config};
+use crate::job::{JobDescription, JobName};
+use crate::{Result, RunId, cloud::aws::AwsCloud, config::Config};
 
 /// The name of a tag identifying a run, attached to jobs and other resources created for the run.
 ///
@@ -55,22 +56,6 @@ impl Display for CloudJobId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
-}
-
-/// Description of a job running or queued on a cloud.
-///
-/// This is parsed/interpreted from the raw description returned by the cloud.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JobDescription {
-    /// The identifier for a job assigned by the cloud.
-    pub cloud_job_id: CloudJobId,
-    pub status: JobStatus,
-    /// Cloud-specific identifier of the log stream for this job, if it's known.
-    // (This might later need to be generalized for other clouds?)
-    pub log_stream_name: Option<String>,
-    /// Raw job name as returned by the cloud.
-    pub raw_job_name: Option<String>,
-    // TODO: The run id and shard number, extracted from tags on the job.
 }
 
 /// Abstract trait to tail logs from a single job running on a cloud.

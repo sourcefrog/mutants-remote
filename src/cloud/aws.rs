@@ -27,8 +27,9 @@ use bytes::Bytes;
 use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
-use crate::{Error, JobName, JobStatus, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
+use super::{Cloud, CloudJobId, LogTail, RUN_ID_TAG};
+use crate::job::{JobDescription, JobName, JobStatus};
+use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,

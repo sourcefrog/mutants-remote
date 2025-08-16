@@ -29,6 +29,8 @@ mod config;
 use crate::config::Config;
 mod error;
 use crate::error::Error;
+mod job;
+use crate::job::{JobName, JobStatus};
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -69,31 +71,9 @@ enum Commands {
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// Describes the status of a job.
-#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
-pub enum JobStatus {
-    Submitted,
-    Pending,
-    Starting,
-    Runnable,
-    Running,
-    Completed,
-    Stopping,
-    Failed,
-    Unknown,
-}
-
 /// Identifier assigned by us to a run.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RunId(String);
-
-/// Name assigned by us to a job within a run, including the run id.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JobName {
-    run_id: RunId,
-    // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
-    shard_k: u32,
-}
 
 #[tokio::main]
 #[allow(clippy::result_large_err)]
