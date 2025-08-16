@@ -23,7 +23,8 @@ use tracing::{error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
-use crate::cloud::{Cloud, CloudJobId, aws::AwsCloud};
+use crate::cloud::open_cloud;
+use crate::cloud::{Cloud, CloudJobId};
 mod config;
 use crate::config::Config;
 mod error;
@@ -55,6 +56,12 @@ enum Commands {
         /// Total number of shards
         #[arg(long, default_value = "10")]
         shards: u32,
+    },
+
+    /// List jobs
+    #[command(alias = "ls")]
+    List {
+        // TODO: Options for the queue, cutoff time, other filters?
     },
 }
 
@@ -89,12 +96,7 @@ pub struct JobName {
 #[tokio::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
-
-    let result = match &cli.command {
-        Commands::Run { source, shards } => run_command(&cli, source, *shards).await,
-    };
-    match result {
+    match inner_main().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             error!("{err}");
@@ -103,79 +105,108 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run_command(cli: &Cli, source_dir: &Path, shards: u32) -> Result<()> {
+async fn inner_main() -> Result<()> {
+    let cli = Cli::parse();
     let run_id = RunId::new();
     setup_tracing(&run_id);
 
+    // TODO: Default path in ~/.config
     let config = if let Some(config_path) = &cli.config {
         Config::from_file(config_path)?
     } else {
         Config::default()
     };
-
-    // Create AWS cloud provider
-    let cloud = match AwsCloud::new(config.clone()).await {
-        Ok(cloud) => cloud,
-        Err(err) => {
-            error!("Failed to initialize AWS cloud: {err}");
-            return Err(err);
-        }
+    let cloud = open_cloud(&config).await?;
+    let app = App {
+        config,
+        cloud,
+        cli,
+        run_id,
     };
 
-    let source_tarball_path = tar_source(source_dir).await?;
-    match cloud
-        .upload_source_tarball(&run_id, &source_tarball_path)
-        .await
-    {
-        Ok(()) => {}
-        Err(err) => {
-            error!("Failed to upload source tarball: {err}");
-            return Err(err);
+    match &app.cli.command {
+        Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
+        Commands::List {} => app.list().await,
+    }
+}
+
+struct App {
+    config: Config,
+    cloud: Box<dyn Cloud>,
+    cli: Cli,
+    run_id: RunId,
+}
+
+impl App {
+    async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
+        let source_tarball_path = tar_source(source_dir).await?;
+        match self
+            .cloud
+            .upload_source_tarball(&self.run_id, &source_tarball_path)
+            .await
+        {
+            Ok(()) => {}
+            Err(err) => {
+                error!("Failed to upload source tarball: {err}");
+                return Err(err);
+            }
         }
+
+        // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
+
+        // Submit job
+        let shard_k = 0;
+        let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
+        let job_name = JobName {
+            run_id: self.run_id.clone(),
+            shard_k,
+        };
+        info!(?job_name, "Submitting job");
+        let job_id = match self.cloud.submit_job(&job_name, script).await {
+            Ok(id) => id,
+            Err(err) => {
+                error!("Failed to submit job: {err}");
+                return Err(err);
+            }
+        };
+
+        // Monitor job
+        let _final_status = match monitor_job(self.cloud.as_ref(), &job_id).await {
+            Ok(status) => status,
+            Err(err) => {
+                error!("Failed to monitor job: {err}");
+                return Err(err);
+            }
+        };
+
+        // Fetch output
+        match self.cloud.fetch_output(&job_name).await {
+            Ok(output_path) => {
+                info!(
+                    "Job completed successfully. Output available at: {}",
+                    output_path.display()
+                );
+            }
+            Err(err) => {
+                error!("Failed to fetch output: {err}");
+                return Err(err);
+            }
+        }
+
+        Ok(())
     }
 
-    // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
-
-    // Submit job
-    let shard_k = 0;
-    let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
-    let job_name = JobName {
-        run_id: run_id.clone(),
-        shard_k,
-    };
-    info!(?job_name, "Submitting job");
-    let job_id = match cloud.submit_job(&job_name, script).await {
-        Ok(id) => id,
-        Err(err) => {
-            error!("Failed to submit job: {err}");
-            return Err(err);
-        }
-    };
-
-    // Monitor job
-    let _final_status = match monitor_job(&cloud, &job_id).await {
-        Ok(status) => status,
-        Err(err) => {
-            error!("Failed to monitor job: {err}");
-            return Err(err);
-        }
-    };
-
-    // Fetch output
-    match cloud.fetch_output(&job_name).await {
-        Ok(output_path) => {
-            info!(
-                "Job completed successfully. Output available at: {}",
-                output_path.display()
+    async fn list(&self) -> Result<()> {
+        let jobs = self.cloud.list_jobs().await?;
+        for job in jobs {
+            println!(
+                "Job {id} status {status}",
+                id = job.job_id,
+                status = job.status
             );
         }
-        Err(err) => {
-            error!("Failed to fetch output: {err}");
-            return Err(err);
-        }
+        Ok(())
     }
-
-    Ok(())
 }
 
 async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus> {

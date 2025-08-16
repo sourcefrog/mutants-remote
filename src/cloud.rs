@@ -2,11 +2,15 @@
 //!
 //! Provides an aspirationally generic interface for cloud providers: the core features are to get and put files, launch jobs, and monitor the status of jobs.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::{Display, Formatter},
+    path::{Path, PathBuf},
+};
 
 use async_trait::async_trait;
+use tracing::error;
 
-use crate::{JobName, JobStatus, Result, RunId};
+use crate::{JobName, JobStatus, Result, RunId, cloud::aws::AwsCloud, config::Config};
 
 /// The name of a tag identifying a run, attached to jobs and other resources created for the run.
 ///
@@ -30,11 +34,28 @@ pub trait Cloud {
     async fn list_jobs(&self) -> Result<Vec<JobDescription>>;
 }
 
+/// Create a new cloud provider instance from the configuration.
+pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
+    match AwsCloud::new(config.clone()).await {
+        Ok(cloud) => Ok(Box::new(cloud)),
+        Err(err) => {
+            error!("Failed to initialize AWS cloud: {err}");
+            Err(err)
+        }
+    }
+}
+
 /// The identifier for a job assigned by the cloud.
 ///
 /// By contrast [`crate::JobName`] is the name chosen by us, before submitting the job.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloudJobId(String);
+
+impl Display for CloudJobId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Description of a job running or queued on a cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

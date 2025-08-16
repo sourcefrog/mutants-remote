@@ -12,7 +12,7 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::{
     error::SdkError,
     types::{
-        EcsPropertiesOverride, JobStatus as AwsJobStatus, TaskContainerOverrides,
+        EcsPropertiesOverride, JobStatus as AwsJobStatus, KeyValuesPair, TaskContainerOverrides,
         TaskPropertiesOverride,
     },
 };
@@ -21,6 +21,7 @@ use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
 use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
+use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 
 use super::{Cloud, CloudJobId, JobDescription, LogTail, RUN_ID_TAG};
@@ -263,21 +264,34 @@ impl Cloud for AwsCloud {
     async fn list_jobs(&self) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
         // TODO: Maybe filter to one queue?
-        let stream = self
+        debug!(job_queue_name = ?self.job_queue_name, "Listing jobs");
+        // We must set a filter to get jobs in all states.
+        let cutoff_time = OffsetDateTime::now_utc() - time::Duration::days(7);
+        let cutoff_unix_millis = cutoff_time.unix_timestamp() * 1000;
+        let filters = KeyValuesPair::builder()
+            .name("AFTER_CREATED_AT")
+            .values(cutoff_unix_millis.to_string())
+            .build();
+        let list_jobs_builder = self
             .batch_client
             .list_jobs()
-            .into_paginator()
-            .items()
-            .send();
+            .filters(filters)
+            .job_queue(&self.job_queue_name);
+        let stream = list_jobs_builder.into_paginator().items().send();
         let summaries = stream.collect::<Vec<_>>().await;
+        debug!("Received {} job summaries", summaries.len());
         let mut jobs = Vec::new();
         for summary in summaries {
-            let summary = summary?;
+            let summary = summary.inspect_err(|err| error!(?err, "list_jobs error"))?;
             // To get the tags, which will let us understand what the job is doing, we have to describe the job
             let cloud_job_id = CloudJobId(summary.job_id.expect("job_id"));
-            let description = self.describe_job(&cloud_job_id).await?;
+            let description = self
+                .describe_job(&cloud_job_id)
+                .await
+                .inspect_err(|err| error!(?err, "describe_job error"))?;
             jobs.push(description);
         }
+        info!("{} jobs listed", jobs.len());
         Ok(jobs)
     }
 
@@ -419,6 +433,14 @@ impl<R: Debug + Send + Sync + 'static, E: std::error::Error + Sync + Send + 'sta
     From<SdkError<E, R>> for Error
 {
     fn from(err: SdkError<E, R>) -> Self {
-        Error::Cloud(Box::new(err))
+        match err {
+            // Unpack this because the Display form of the service error is much more informative,
+            // including the actual message from the service. The top level error is often just
+            // "service error".
+            SdkError::ServiceError(service_error) => {
+                Error::Cloud(Box::new(service_error.into_err()))
+            }
+            _ => Error::Cloud(Box::new(err)),
+        }
     }
 }

@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cloud provider error: {0}")]
-    Cloud(Box<dyn std::error::Error + Send + Sync>),
+    Cloud(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
