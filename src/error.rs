@@ -5,6 +5,9 @@ use thiserror::Error;
 // TODO: Also try `thistermination` to give specific error codes...
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Credentials problem: {0}")]
+    Credentials(String),
+
     #[error("Cloud provider error: {0}")]
     Cloud(#[source] Box<dyn std::error::Error + Send + Sync>),
 

@@ -2,6 +2,9 @@
 
 //! AWS Batch implementation of the Cloud abstraction.
 
+#[allow(unused_imports)]
+use std::error::Error as StdError;
+
 use std::{
     fmt::Debug,
     path::{Path, PathBuf},
@@ -81,9 +84,31 @@ impl AwsCloud {
             .clone()
             .unwrap_or("/aws/batch/job".to_string());
 
-        let caller_identity = sts_client.get_caller_identity().send().await?;
-        let account_id = caller_identity.account().unwrap().to_owned();
-        debug!(?account_id);
+        let account_id = match sts_client
+            .get_caller_identity()
+            .send()
+            .await
+            .inspect_err(|err| {
+                error!(?err, "GetCallerIdentity failed");
+            }) {
+            Err(aws_sdk_sts::error::SdkError::DispatchFailure(dispatch)) => {
+                error!(
+                    ?dispatch,
+                    is_io = dispatch.is_io(),
+                    is_user = dispatch.is_user(),
+                    is_other = dispatch.is_other(),
+                    is_timeout = dispatch.is_timeout(),
+                    "DispatchFailure"
+                );
+                Err(Error::Credentials(format!("{dispatch:?}")))
+            }
+            Err(err) => Err(err.into()),
+            Ok(caller_identity) => {
+                let account_id = caller_identity.account().unwrap().to_owned();
+                debug!(?account_id);
+                Ok(account_id)
+            }
+        }?;
 
         Ok(Self {
             account_id,
@@ -242,9 +267,8 @@ impl Cloud for AwsCloud {
                 Error::Cloud(e.into())
             })?;
         debug!(?job_id, ?description, "Job description");
-        let ecs_properties = description.jobs()[0]
-            .ecs_properties()
-            .expect("ecs_properties");
+        let job_detail = description.jobs().first().expect("Job detail");
+        let ecs_properties = job_detail.ecs_properties().expect("ecs_properties");
         assert_eq!(
             ecs_properties.task_properties().len(),
             1,
@@ -255,7 +279,7 @@ impl Cloud for AwsCloud {
             .log_stream_name()
             .map(ToOwned::to_owned);
         Ok(JobDescription {
-            job_id: job_id.clone(),
+            cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
             log_stream_name,
         })
@@ -282,6 +306,7 @@ impl Cloud for AwsCloud {
         debug!("Received {} job summaries", summaries.len());
         let mut jobs = Vec::new();
         for summary in summaries {
+            // TODO: We could actually describe them in batches of up to 100 jobs at a time
             let summary = summary.inspect_err(|err| error!(?err, "list_jobs error"))?;
             // To get the tags, which will let us understand what the job is doing, we have to describe the job
             let cloud_job_id = CloudJobId(summary.job_id.expect("job_id"));

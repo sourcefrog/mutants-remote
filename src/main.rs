@@ -201,7 +201,7 @@ impl App {
         for job in jobs {
             println!(
                 "Job {id} status {status}",
-                id = job.job_id,
+                id = job.cloud_job_id,
                 status = job.status
             );
         }

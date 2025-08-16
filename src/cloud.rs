@@ -60,7 +60,8 @@ impl Display for CloudJobId {
 /// Description of a job running or queued on a cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JobDescription {
-    pub job_id: CloudJobId,
+    /// The identifier for a job assigned by the cloud.
+    pub cloud_job_id: CloudJobId,
     pub status: JobStatus,
     /// Cloud-specific identifier of the log stream for this job, if it's known.
     // (This might later need to be generalized for other clouds?)
