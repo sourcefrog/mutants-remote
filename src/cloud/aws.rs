@@ -80,11 +80,7 @@ impl AwsCloud {
             .clone()
             .unwrap_or("/aws/batch/job".to_string());
 
-        let caller_identity = sts_client
-            .get_caller_identity()
-            .send()
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+        let caller_identity = sts_client.get_caller_identity().send().await?;
         let account_id = caller_identity.account().unwrap().to_owned();
         debug!(?account_id);
 
@@ -145,9 +141,13 @@ impl AwsCloud {
 impl Cloud for AwsCloud {
     async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()> {
         debug!("Uploading source tarball to S3");
-        let source_tarball_body = ByteStream::from_path(source_tarball)
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+        let source_tarball_body = ByteStream::from_path(source_tarball).await.map_err(|err| {
+            error!(
+                "Failed to read source tarball {}: {err}",
+                source_tarball.display()
+            );
+            Error::Cloud(err.into())
+        })?;
         self.s3_client
             .put_object()
             .bucket(&self.s3_bucket_name)
@@ -155,8 +155,7 @@ impl Cloud for AwsCloud {
             .body(source_tarball_body)
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .send()
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+            .await?;
         Ok(())
     }
 
@@ -187,8 +186,7 @@ impl Cloud for AwsCloud {
             .body(ByteStream::from(Bytes::from(wrapped_script)))
             .bucket(&self.s3_bucket_name)
             .send()
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+            .await?;
         let script_s3_url = self.s3_url(&script_key);
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
@@ -224,8 +222,7 @@ impl Cloud for AwsCloud {
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
             .send()
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+            .await?;
 
         let job_id = result.job_id().unwrap().to_owned();
         info!(?job_id, "Job submitted successfully: {:?}", result);
@@ -265,6 +262,7 @@ impl Cloud for AwsCloud {
 
     async fn list_jobs(&self) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
+        // TODO: Maybe filter to one queue?
         let stream = self
             .batch_client
             .list_jobs()
@@ -292,15 +290,14 @@ impl Cloud for AwsCloud {
             .bucket(&self.s3_bucket_name)
             .key(&output_tarball_key)
             .send()
-            .await
-            .map_err(|e| Error::Cloud(e.into()))?;
+            .await?;
 
         let local_output_tarball_path =
             std::env::temp_dir().join(format!("mutants-remote-output-{job_name}.tar.zstd",));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&local_output_tarball_path, body)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|err| Error::on_path(err, &local_output_tarball_path))?;
         info!("Output fetched to {}", local_output_tarball_path.display());
 
         Ok(local_output_tarball_path)
@@ -402,7 +399,7 @@ impl crate::cloud::LogTail for AwsLogTail {
                 }
                 Err(err) => {
                     error!("Error fetching log events: {}", err);
-                    return Err(Error::Cloud(err.into()));
+                    return Err(err.into());
                 }
             }
         }

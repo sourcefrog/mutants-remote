@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 // TODO: Also try `thistermination` to give specific error codes...
@@ -8,6 +10,9 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("IO error: {0} on {1}")]
+    Path(std::io::Error, PathBuf),
 
     #[error("Invalid configuration: {0}")]
     Config(String),
@@ -25,4 +30,10 @@ pub enum Error {
     // #[allow(dead_code)]
     // #[error("Invalid configuration: {0}")]
     // Config(String),
+}
+
+impl Error {
+    pub fn on_path<P: Into<PathBuf>>(err: std::io::Error, path: P) -> Self {
+        Self::Path(err, path.into())
+    }
 }
