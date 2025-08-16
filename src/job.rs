@@ -1,6 +1,6 @@
 //! Cloud-independent job description and identifiers.
 
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -39,7 +39,7 @@ impl FromStr for JobName {
 /// Description of a job running or queued on a cloud.
 ///
 /// This is parsed/interpreted from the raw description returned by the cloud.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct JobDescription {
     /// The identifier for a job assigned by the cloud.
     pub cloud_job_id: CloudJobId,
@@ -56,7 +56,7 @@ pub struct JobDescription {
     pub started_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub stopped_at: Option<OffsetDateTime>,
-    // TODO: The run id and shard number, extracted from tags on the job.
+    pub cloud_tags: Option<HashMap<String, String>>,
 }
 
 impl JobDescription {

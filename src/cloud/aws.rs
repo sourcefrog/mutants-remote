@@ -294,6 +294,7 @@ impl Cloud for AwsCloud {
             job_name,
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
+            cloud_tags: job_detail.tags.clone(),
         })
     }
 
