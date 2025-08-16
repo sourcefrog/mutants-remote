@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use serde::Serialize;
 use tracing::error;
 
 use crate::job::{JobDescription, JobName};
@@ -49,7 +50,7 @@ pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
 /// The identifier for a job assigned by the cloud.
 ///
 /// By contrast [`crate::JobName`] is the name chosen by us, before submitting the job.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct CloudJobId(String);
 
 impl Display for CloudJobId {

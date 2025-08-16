@@ -2,13 +2,14 @@
 
 use std::str::FromStr;
 
+use serde::Serialize;
 use time::OffsetDateTime;
 
 use super::RunId;
 use crate::cloud::CloudJobId;
 
 /// Name assigned by us to a job within a run, including the run id.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
 pub struct JobName {
     pub run_id: RunId,
     // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
@@ -38,7 +39,7 @@ impl FromStr for JobName {
 /// Description of a job running or queued on a cloud.
 ///
 /// This is parsed/interpreted from the raw description returned by the cloud.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct JobDescription {
     /// The identifier for a job assigned by the cloud.
     pub cloud_job_id: CloudJobId,
@@ -50,7 +51,9 @@ pub struct JobDescription {
     pub raw_job_name: Option<String>,
     /// Parsed job name, it it can be parsed.
     pub job_name: Option<JobName>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub started_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub stopped_at: Option<OffsetDateTime>,
     // TODO: The run id and shard number, extracted from tags on the job.
 }
@@ -67,7 +70,7 @@ impl JobDescription {
 }
 
 /// Describes the status of a job.
-#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, derive_more::Display, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum JobStatus {
     Submitted,
     Pending,

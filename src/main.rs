@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::{env::temp_dir, fs::File};
 
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use time::{OffsetDateTime, macros::format_description};
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -68,13 +69,16 @@ enum Commands {
         /// List all known fields.
         #[arg(long, short = 'v')]
         verbose: bool,
+
+        #[arg(long)]
+        json: bool,
     },
 }
 
 type Result<T> = std::result::Result<T, Error>;
 
 /// Identifier assigned by us to a run.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
 pub struct RunId(String);
 
 #[tokio::main]
@@ -110,7 +114,7 @@ async fn inner_main() -> Result<()> {
 
     match &app.cli.command {
         Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
-        Commands::List { verbose } => app.list(*verbose).await,
+        Commands::List { json, verbose } => app.list(*json, *verbose).await,
     }
 }
 
@@ -181,30 +185,34 @@ impl App {
         Ok(())
     }
 
-    async fn list(&self, verbose: bool) -> Result<()> {
+    async fn list(&self, json: bool, verbose: bool) -> Result<()> {
         // TODO: Aggregate the jobs by run_id and just summarize the run by default?
         let mut jobs = self.cloud.list_jobs().await?;
         jobs.sort_by(|a, b| a.job_name.cmp(&b.job_name));
-        for description in jobs {
-            if verbose {
-                println!("{description:#?}");
-            } else if let Some(job_name) = &description.job_name {
-                print!(
-                    "Run {run_id} shard {shard_k} status {status}",
-                    run_id = job_name.run_id,
-                    shard_k = job_name.shard_k,
-                    status = description.status,
-                );
-                if let Some(duration) = description.duration() {
-                    print!(" duration {}", humantime::format_duration(duration));
+        if json {
+            println!("{}", serde_json::to_string_pretty(&jobs).unwrap());
+        } else {
+            for description in jobs {
+                if verbose {
+                    println!("{description:#?}");
+                } else if let Some(job_name) = &description.job_name {
+                    print!(
+                        "Run {run_id} shard {shard_k} status {status}",
+                        run_id = job_name.run_id,
+                        shard_k = job_name.shard_k,
+                        status = description.status,
+                    );
+                    if let Some(duration) = description.duration() {
+                        print!(" duration {}", humantime::format_duration(duration));
+                    }
+                    println!();
+                } else {
+                    println!(
+                        "Unrecognized job {cloud_job_id} status {status}",
+                        cloud_job_id = description.cloud_job_id,
+                        status = description.status
+                    );
                 }
-                println!();
-            } else {
-                println!(
-                    "Unrecognized job {cloud_job_id} status {status}",
-                    cloud_job_id = description.cloud_job_id,
-                    status = description.status
-                );
             }
         }
         Ok(())
