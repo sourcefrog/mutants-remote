@@ -2,6 +2,8 @@
 
 use std::str::FromStr;
 
+use time::OffsetDateTime;
+
 use super::RunId;
 use crate::cloud::CloudJobId;
 
@@ -48,7 +50,20 @@ pub struct JobDescription {
     pub raw_job_name: Option<String>,
     /// Parsed job name, it it can be parsed.
     pub job_name: Option<JobName>,
+    pub started_at: Option<OffsetDateTime>,
+    pub stopped_at: Option<OffsetDateTime>,
     // TODO: The run id and shard number, extracted from tags on the job.
+}
+
+impl JobDescription {
+    pub fn duration(&self) -> Option<std::time::Duration> {
+        // TODO: Maybe for currently running or queued jobs, give the elapsed time since start?
+        match (self.started_at, self.stopped_at) {
+            // Sometimes in AWS batch some jobs that have failed have a start time but no end time.
+            (Some(start), Some(stop)) => (stop - start).try_into().ok(), // only ok if >=0
+            _ => None,
+        }
+    }
 }
 
 /// Describes the status of a job.

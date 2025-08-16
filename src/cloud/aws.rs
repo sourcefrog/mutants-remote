@@ -291,6 +291,8 @@ impl Cloud for AwsCloud {
             log_stream_name,
             raw_job_name,
             job_name,
+            started_at: from_unix_millis(job_detail.started_at),
+            stopped_at: from_unix_millis(job_detail.stopped_at),
         })
     }
 
@@ -476,5 +478,13 @@ impl<R: Debug + Send + Sync + 'static, E: std::error::Error + Sync + Send + 'sta
             }
             _ => Error::Cloud(Box::new(err)),
         }
+    }
+}
+
+/// Convert from unix millis, treating 0 as unknown.
+fn from_unix_millis(t: Option<i64>) -> Option<OffsetDateTime> {
+    match t {
+        Some(0) | None => None,
+        Some(t) => OffsetDateTime::from_unix_timestamp_nanos(t as i128 * 1_000_000).ok(),
     }
 }

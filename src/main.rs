@@ -188,13 +188,17 @@ impl App {
         for description in jobs {
             if verbose {
                 println!("{description:#?}");
-            } else if let Some(job_name) = description.job_name {
-                println!(
+            } else if let Some(job_name) = &description.job_name {
+                print!(
                     "Run {run_id} shard {shard_k} status {status}",
                     run_id = job_name.run_id,
                     shard_k = job_name.shard_k,
-                    status = description.status
+                    status = description.status,
                 );
+                if let Some(duration) = description.duration() {
+                    print!(" duration {}", humantime::format_duration(duration));
+                }
+                println!();
             } else {
                 println!(
                     "Unrecognized job {cloud_job_id} status {status}",
