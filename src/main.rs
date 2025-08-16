@@ -74,7 +74,7 @@ enum Commands {
 type Result<T> = std::result::Result<T, Error>;
 
 /// Identifier assigned by us to a run.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct RunId(String);
 
 #[tokio::main]
@@ -183,7 +183,8 @@ impl App {
 
     async fn list(&self, verbose: bool) -> Result<()> {
         // TODO: Aggregate the jobs by run_id and just summarize the run by default?
-        let jobs = self.cloud.list_jobs().await?;
+        let mut jobs = self.cloud.list_jobs().await?;
+        jobs.sort_by(|a, b| a.job_name.cmp(&b.job_name));
         for description in jobs {
             if verbose {
                 println!("{description:#?}");

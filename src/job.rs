@@ -6,7 +6,7 @@ use super::RunId;
 use crate::cloud::CloudJobId;
 
 /// Name assigned by us to a job within a run, including the run id.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct JobName {
     pub run_id: RunId,
     // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
@@ -15,7 +15,7 @@ pub struct JobName {
 
 impl std::fmt::Display for JobName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-shard-{}", self.run_id, self.shard_k)
+        write!(f, "{}-shard-{:04}", self.run_id, self.shard_k)
     }
 }
 
@@ -69,7 +69,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_job_name_parsing() {
+    fn job_name_parsing() {
         let run_id = RunId("20250102030405-abcd".to_string());
         let shard_k = 13;
         let job_name = JobName {
@@ -77,7 +77,7 @@ mod tests {
             shard_k,
         };
         let job_name_str = job_name.to_string();
-        assert_eq!(job_name_str, "20250102030405-abcd-shard-13");
+        assert_eq!(job_name_str, "20250102030405-abcd-shard-0013");
         let parsed = JobName::from_str(&job_name_str).unwrap();
         assert_eq!(parsed.run_id, run_id);
         assert_eq!(job_name.shard_k, shard_k);
