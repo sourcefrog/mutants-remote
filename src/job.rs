@@ -44,6 +44,7 @@ pub struct JobDescription {
     /// The identifier for a job assigned by the cloud.
     pub cloud_job_id: CloudJobId,
     pub status: JobStatus,
+    pub status_reason: Option<String>,
     /// Cloud-specific identifier of the log stream for this job, if it's known.
     // (This might later need to be generalized for other clouds?)
     pub log_stream_name: Option<String>,

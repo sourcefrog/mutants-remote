@@ -288,6 +288,7 @@ impl Cloud for AwsCloud {
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
+            status_reason: job_detail.status_reason().map(ToOwned::to_owned),
             log_stream_name,
             raw_job_name,
             job_name,
