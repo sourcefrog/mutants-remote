@@ -282,6 +282,7 @@ impl Cloud for AwsCloud {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
             log_stream_name,
+            raw_job_name: job_detail.job_name().map(ToOwned::to_owned),
         })
     }
 

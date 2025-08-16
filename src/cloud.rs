@@ -58,6 +58,8 @@ impl Display for CloudJobId {
 }
 
 /// Description of a job running or queued on a cloud.
+///
+/// This is parsed/interpreted from the raw description returned by the cloud.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JobDescription {
     /// The identifier for a job assigned by the cloud.
@@ -66,6 +68,8 @@ pub struct JobDescription {
     /// Cloud-specific identifier of the log stream for this job, if it's known.
     // (This might later need to be generalized for other clouds?)
     pub log_stream_name: Option<String>,
+    /// Raw job name as returned by the cloud.
+    pub raw_job_name: Option<String>,
     // TODO: The run id and shard number, extracted from tags on the job.
 }
 

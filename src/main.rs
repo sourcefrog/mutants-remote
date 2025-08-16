@@ -62,6 +62,8 @@ enum Commands {
     #[command(alias = "ls")]
     List {
         // TODO: Options for the queue, cutoff time, other filters?
+        #[arg(long, short = 'v')]
+        verbose: bool,
     },
 }
 
@@ -126,7 +128,7 @@ async fn inner_main() -> Result<()> {
 
     match &app.cli.command {
         Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
-        Commands::List {} => app.list().await,
+        Commands::List { verbose } => app.list(*verbose).await,
     }
 }
 
@@ -196,14 +198,18 @@ impl App {
         Ok(())
     }
 
-    async fn list(&self) -> Result<()> {
+    async fn list(&self, verbose: bool) -> Result<()> {
         let jobs = self.cloud.list_jobs().await?;
-        for job in jobs {
-            println!(
-                "Job {id} status {status}",
-                id = job.cloud_job_id,
-                status = job.status
-            );
+        for description in jobs {
+            if verbose {
+                println!("{description:#?}");
+            } else {
+                println!(
+                    "Job {id} status {status}",
+                    id = description.cloud_job_id,
+                    status = description.status
+                );
+            }
         }
         Ok(())
     }
