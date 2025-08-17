@@ -5,6 +5,9 @@ use thiserror::Error;
 // TODO: Also try `thistermination` to give specific error codes...
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Invalid Run ID: {0}")]
+    InvalidRunId(String),
+
     #[error("Credentials problem: {0}")]
     Credentials(String),
 

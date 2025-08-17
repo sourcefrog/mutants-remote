@@ -26,7 +26,7 @@ use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use time::OffsetDateTime;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
 use crate::tags::{CLIENT_USERNAME_TAG, RUN_ID_TAG, SOURCE_DIR_TAIL_TAG};
@@ -291,7 +291,7 @@ impl Cloud for AwsCloud {
                 error!("Describe job failed: {}", e);
                 Error::Cloud(e.into())
             })?;
-        debug!(?job_id, ?description, "Job description");
+        trace!(?job_id, ?description, "Job description");
         let job_detail = description.jobs().first().expect("Job detail");
         let ecs_properties = job_detail.ecs_properties().expect("ecs_properties");
         assert_eq!(
@@ -332,6 +332,42 @@ impl Cloud for AwsCloud {
         })
     }
 
+    async fn kill(&self, run_id: &RunId) -> Result<()> {
+        debug!("Killing run {}", run_id);
+        let jobs_to_kill = self
+            .list_jobs()
+            .await?
+            .into_iter()
+            .filter(|j| {
+                j.job_name.as_ref().is_some_and(|n| n.run_id == *run_id)
+                    && !matches!(j.status, JobStatus::Completed | JobStatus::Failed)
+            })
+            .collect::<Vec<_>>();
+        let mut n_killed = 0;
+        for job in jobs_to_kill {
+            let job_name = job.job_name;
+            let cloud_job_id = job.cloud_job_id;
+            debug!(?job_name, "Terminating job");
+            // TODO: We could spawn them off here.
+            match self
+                .batch_client
+                .terminate_job()
+                .job_id(cloud_job_id.0.clone())
+                .reason("Killed by `mutants-remote kill`")
+                .send()
+                .await
+            {
+                Ok(result) => {
+                    debug!(?result, ?cloud_job_id, ?job_name, "Terminated job");
+                    n_killed += 1;
+                }
+                Err(err) => warn!(?err, ?cloud_job_id, ?job_name, "Failed to terminate job"), // continue on anyhow, maybe it already terminated
+            }
+        }
+        info!("Terminated {} jobs", n_killed);
+        Ok(())
+    }
+
     async fn list_jobs(&self) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
         // TODO: Maybe filter to one queue?
@@ -363,7 +399,7 @@ impl Cloud for AwsCloud {
                 .inspect_err(|err| error!(?err, "describe_job error"))?;
             jobs.push(description);
         }
-        info!("{} jobs listed", jobs.len());
+        debug!("{} jobs listed", jobs.len());
         Ok(jobs)
     }
 

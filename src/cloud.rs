@@ -35,6 +35,9 @@ pub trait Cloud {
 
     /// List all jobs, including queued, running, and completed.
     async fn list_jobs(&self) -> Result<Vec<JobDescription>>;
+
+    /// Kill all jobs associated with a run.
+    async fn kill(&self, run_id: &RunId) -> Result<()>;
 }
 
 /// Create a new cloud provider instance from the configuration.

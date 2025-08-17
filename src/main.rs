@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{env::temp_dir, fs::File};
 
@@ -77,6 +78,13 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Kill runs
+    Kill {
+        /// Run ID to kill
+        #[arg(long, short = 'i')]
+        run_id: RunId,
+    },
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -84,6 +92,18 @@ type Result<T> = std::result::Result<T, Error>;
 /// Identifier assigned by us to a run.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
 pub struct RunId(String);
+
+impl FromStr for RunId {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if s.is_empty() {
+            Err(Error::InvalidRunId("Run ID cannot be empty".to_string()))
+        } else {
+            Ok(RunId(s.to_string()))
+        }
+    }
+}
 
 #[tokio::main]
 #[allow(clippy::result_large_err)]
@@ -115,6 +135,7 @@ async fn inner_main() -> Result<()> {
     match &app.cli.command {
         Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
         Commands::List { json, verbose } => app.list(*json, *verbose).await,
+        Commands::Kill { run_id } => app.kill(run_id).await,
     }
 }
 
@@ -130,6 +151,10 @@ impl App {
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
         let job_metadata = JobMetadata::new(source_dir);
         let source_tarball_path = tar_source(source_dir).await?;
+        debug!(
+            "Source tarball size: {}",
+            source_tarball_path.metadata()?.len()
+        );
         match self
             .cloud
             .upload_source_tarball(&self.run_id, &source_tarball_path)
@@ -220,6 +245,11 @@ impl App {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn kill(&self, run_id: &RunId) -> Result<()> {
+        self.cloud.kill(run_id).await?;
         Ok(())
     }
 }
