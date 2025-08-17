@@ -1,6 +1,6 @@
 //! Cloud-independent job description and identifiers.
 
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, path::Path, str::FromStr};
 
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -90,6 +90,24 @@ pub enum JobStatus {
 pub struct JobMetadata {
     /// The tail of the source directory path.
     pub source_dir_tail: Option<String>,
+    /// The client hostname.
+    pub client_hostname: Option<String>,
+    /// The local user name on the client.
+    pub client_username: Option<String>,
+}
+
+impl JobMetadata {
+    pub fn new(source_dir: &Path) -> Self {
+        JobMetadata {
+            source_dir_tail: source_dir
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned()),
+            client_hostname: hostname::get()
+                .ok()
+                .map(|h| h.to_string_lossy().into_owned()),
+            client_username: Some(whoami::username()),
+        }
+    }
 }
 
 #[cfg(test)]

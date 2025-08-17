@@ -6,6 +6,7 @@
 use std::error::Error as StdError;
 
 use std::{
+    collections::HashMap,
     fmt::Debug,
     path::{Path, PathBuf},
 };
@@ -28,9 +29,12 @@ use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::job::{JobDescription, JobMetadata, JobName, JobStatus};
-use crate::tags::{RUN_ID_TAG, SOURCE_DIR_TAIL_TAG};
+use crate::tags::{CLIENT_USERNAME_TAG, RUN_ID_TAG, SOURCE_DIR_TAIL_TAG};
 use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
+use crate::{
+    job::{JobDescription, JobMetadata, JobName, JobStatus},
+    tags::CLIENT_HOSTNAME_TAG,
+};
 
 pub struct AwsCloud {
     account_id: String,
@@ -245,25 +249,28 @@ impl Cloud for AwsCloud {
             .build();
 
         // TODO: Also a job id tag?
-        let result = self
+        let mut builder = self
             .batch_client
             .submit_job()
             .job_name(job_name.to_string())
             .job_queue(&self.job_queue_name)
             .job_definition(&self.job_definition_name)
             .tags(RUN_ID_TAG, run_id.to_string())
-            .tags(
-                SOURCE_DIR_TAIL_TAG,
-                job_metadata
-                    .source_dir_tail
-                    .as_ref()
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default(),
-            )
             .propagate_tags(true)
-            .ecs_properties_override(ecs_properties_overrides)
+            .ecs_properties_override(ecs_properties_overrides);
+        if let Some(source_dir_tail) = &job_metadata.source_dir_tail {
+            builder = builder.tags(SOURCE_DIR_TAIL_TAG, source_dir_tail.to_string());
+        }
+        if let Some(client_username) = &job_metadata.client_username {
+            builder = builder.tags(CLIENT_USERNAME_TAG, client_username.to_string());
+        }
+        if let Some(client_hostname) = &job_metadata.client_hostname {
+            builder = builder.tags(CLIENT_HOSTNAME_TAG, client_hostname.to_string());
+        }
+        let result = builder
             .send()
-            .await?;
+            .await
+            .inspect_err(|err| error!(?err, "SubmitJob failed"))?;
 
         let job_id = result.job_id().unwrap().to_owned();
         info!(?job_id, "Job submitted successfully: {:?}", result);
@@ -299,12 +306,14 @@ impl Cloud for AwsCloud {
                 .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
                 .ok()
         });
+        let mut tags = job_detail
+            .tags
+            .as_ref()
+            .map_or_else(HashMap::new, HashMap::clone);
         let job_metadata = Some(JobMetadata {
-            source_dir_tail: job_detail
-                .tags
-                .as_ref()
-                .and_then(|tags| tags.get(SOURCE_DIR_TAIL_TAG))
-                .map(ToOwned::to_owned),
+            source_dir_tail: tags.remove(SOURCE_DIR_TAIL_TAG),
+            client_hostname: tags.remove(CLIENT_HOSTNAME_TAG),
+            client_username: tags.remove(CLIENT_USERNAME_TAG),
         });
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),

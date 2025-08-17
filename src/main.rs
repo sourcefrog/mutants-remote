@@ -129,10 +129,7 @@ struct App {
 
 impl App {
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
-        let source_dir_tail = source_dir
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned());
-        let job_metadata = JobMetadata { source_dir_tail };
+        let job_metadata = JobMetadata::new(source_dir);
         let source_tarball_path = tar_source(source_dir).await?;
         match self
             .cloud
