@@ -101,6 +101,8 @@ pub struct JobMetadata {
     pub client_hostname: Option<String>,
     /// The local user name on the client.
     pub client_username: Option<String>,
+    /// The version of mutants-remote that created this job.
+    pub mutants_remote_version: Option<String>,
 }
 
 impl JobMetadata {
@@ -113,6 +115,7 @@ impl JobMetadata {
                 .ok()
                 .map(|h| h.to_string_lossy().into_owned()),
             client_username: Some(whoami::username()),
+            mutants_remote_version: Some(crate::VERSION.to_string()),
         }
     }
 }

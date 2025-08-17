@@ -15,3 +15,6 @@ pub static CLIENT_HOSTNAME_TAG: &str = "mutants-remote/client-hostname";
 
 /// The local user name on the client.
 pub static CLIENT_USERNAME_TAG: &str = "mutants-remote/client-username";
+
+/// The version of mutants-remote that launched this job.
+pub static MUTANTS_REMOTE_VERSION_TAG: &str = "mutants-remote/version";

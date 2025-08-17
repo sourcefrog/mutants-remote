@@ -2,9 +2,6 @@
 
 //! AWS Batch implementation of the Cloud abstraction.
 
-#[allow(unused_imports)]
-use std::error::Error as StdError;
-
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -29,12 +26,12 @@ use time::OffsetDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::tags::{CLIENT_USERNAME_TAG, RUN_ID_TAG, SOURCE_DIR_TAIL_TAG};
-use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
-use crate::{
-    job::{JobDescription, JobMetadata, JobName, JobStatus},
-    tags::CLIENT_HOSTNAME_TAG,
+use crate::job::{JobDescription, JobMetadata, JobName, JobStatus};
+use crate::tags::{
+    CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
+    SOURCE_DIR_TAIL_TAG,
 };
+use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
     account_id: String,
@@ -54,12 +51,8 @@ impl AwsCloud {
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
             .app_name(
-                aws_config::AppName::new(format!(
-                    "{}-{}",
-                    env!("CARGO_PKG_NAME"),
-                    env!("CARGO_PKG_VERSION")
-                ))
-                .unwrap(),
+                aws_config::AppName::new(format!("{}-{}", env!("CARGO_PKG_NAME"), crate::VERSION))
+                    .unwrap(),
             )
             .load()
             .await;
@@ -73,7 +66,7 @@ impl AwsCloud {
         let s3_bucket_name = config
             .aws_s3_bucket
             .clone()
-            .expect("AWS S3 bucket name is required");
+            .expect("AWS S3 bucket name is required in config file");
 
         // TODO: Better default name?
         let job_queue_name = config
@@ -168,6 +161,14 @@ impl AwsCloud {
     fn output_tarball_s3_url(&self, job_name: &JobName) -> String {
         self.s3_url(&self.output_tarball_key(job_name))
     }
+
+    fn s3_tagging(&self, run_id: &RunId) -> String {
+        // Just assuming here that none of the values cause quoting issues.
+        format!(
+            "{RUN_ID_TAG}={run_id}&{MUTANTS_REMOTE_VERSION_TAG}={tool_version}",
+            tool_version = crate::VERSION
+        )
+    }
 }
 
 #[async_trait]
@@ -186,8 +187,8 @@ impl Cloud for AwsCloud {
             .bucket(&self.s3_bucket_name)
             .key(self.source_tarball_key(run_id))
             .body(source_tarball_body)
-            .tagging(format!("{RUN_ID_TAG}={run_id}"))
             .if_none_match("*") // must not exist
+            .tagging(self.s3_tagging(run_id))
             .send()
             .await?;
         Ok(())
@@ -221,7 +222,7 @@ impl Cloud for AwsCloud {
         self.s3_client
             .put_object()
             .key(script_key.clone())
-            .tagging(format!("{RUN_ID_TAG}={run_id}"))
+            .tagging(self.s3_tagging(&job_name.run_id))
             .if_none_match("*") // must not exist
             .body(ByteStream::from(Bytes::from(wrapped_script)))
             .bucket(&self.s3_bucket_name)
@@ -270,6 +271,12 @@ impl Cloud for AwsCloud {
         if let Some(client_hostname) = &job_metadata.client_hostname {
             builder = builder.tags(CLIENT_HOSTNAME_TAG, client_hostname.to_string());
         }
+        if let Some(mutants_remote_version) = &job_metadata.mutants_remote_version {
+            builder = builder.tags(
+                MUTANTS_REMOTE_VERSION_TAG,
+                mutants_remote_version.to_string(),
+            );
+        }
         let result = builder
             .send()
             .await
@@ -317,6 +324,7 @@ impl Cloud for AwsCloud {
             source_dir_tail: tags.remove(SOURCE_DIR_TAIL_TAG),
             client_hostname: tags.remove(CLIENT_HOSTNAME_TAG),
             client_username: tags.remove(CLIENT_USERNAME_TAG),
+            mutants_remote_version: tags.remove(MUTANTS_REMOTE_VERSION_TAG),
         });
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),

@@ -35,6 +35,7 @@ mod job;
 use crate::job::{JobMetadata, JobName, JobStatus};
 mod tags;
 
+static VERSION: &str = env!("CARGO_PKG_VERSION");
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
 
