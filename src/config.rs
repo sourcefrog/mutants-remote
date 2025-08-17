@@ -114,4 +114,10 @@ mod tests {
         assert!(msg.contains("garbage"));
         assert!(msg.contains(config_tmp.path().display().to_string().as_str()));
     }
+
+    #[test]
+    fn parse_example_config_from_source_tree() {
+        let _config = Config::from_file(Path::new("example/mutants-remote.toml")).unwrap();
+        // it's enough that it just parses
+    }
 }
