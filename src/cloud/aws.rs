@@ -325,6 +325,7 @@ impl Cloud for AwsCloud {
             log_stream_name,
             raw_job_name,
             job_name,
+            created_at: from_unix_millis(job_detail.created_at),
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
             cloud_tags: job_detail.tags.clone(),

@@ -52,8 +52,15 @@ pub struct JobDescription {
     pub raw_job_name: Option<String>,
     /// Parsed job name, it it can be parsed.
     pub job_name: Option<JobName>,
+
+    /// The time when the job was created (submitted)
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub created_at: Option<OffsetDateTime>,
+
+    /// The time when the job started running
     #[serde(with = "time::serde::rfc3339::option")]
     pub started_at: Option<OffsetDateTime>,
+
     #[serde(with = "time::serde::rfc3339::option")]
     pub stopped_at: Option<OffsetDateTime>,
     pub cloud_tags: Option<HashMap<String, String>>,

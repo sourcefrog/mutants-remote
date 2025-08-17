@@ -238,7 +238,11 @@ impl App {
                 })?,
         );
         let mut jobs = self.cloud.list_jobs(since).await?;
-        jobs.sort_by(|a, b| a.job_name.cmp(&b.job_name));
+        jobs.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then(a.job_name.cmp(&b.job_name))
+        });
         if json {
             println!("{}", serde_json::to_string_pretty(&jobs).unwrap());
         } else {
