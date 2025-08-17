@@ -75,8 +75,13 @@ enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
 
-        #[arg(long)]
+        /// Output in JSON format.
+        #[arg(long, short = 'j')]
         json: bool,
+
+        /// Display runs that started within a recent period.
+        #[arg(long, short = 's', default_value = "1 day")]
+        since: String,
     },
 
     /// Kill runs
@@ -134,7 +139,7 @@ async fn inner_main() -> Result<()> {
 
     match &app.cli.command {
         Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
-        Commands::List { json, verbose } => app.list(*json, *verbose).await,
+        Commands::List { .. } => app.list().await,
         Commands::Kill { run_id } => app.kill(run_id).await,
     }
 }
@@ -215,9 +220,24 @@ impl App {
         Ok(())
     }
 
-    async fn list(&self, json: bool, verbose: bool) -> Result<()> {
+    async fn list(&self) -> Result<()> {
         // TODO: Aggregate the jobs by run_id and just summarize the run by default?
-        let mut jobs = self.cloud.list_jobs().await?;
+        let Commands::List {
+            json,
+            verbose,
+            ref since,
+        } = self.cli.command
+        else {
+            unreachable!()
+        };
+        let since = Some(
+            OffsetDateTime::now_utc()
+                - humantime::parse_duration(since).map_err(|err| {
+                    error!("Failed to parse duration {since:?}: {err}");
+                    Error::Argument(err.to_string())
+                })?,
+        );
+        let mut jobs = self.cloud.list_jobs(since).await?;
         jobs.sort_by(|a, b| a.job_name.cmp(&b.job_name));
         if json {
             println!("{}", serde_json::to_string_pretty(&jobs).unwrap());

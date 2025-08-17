@@ -335,7 +335,7 @@ impl Cloud for AwsCloud {
     async fn kill(&self, run_id: &RunId) -> Result<()> {
         debug!("Killing run {}", run_id);
         let jobs_to_kill = self
-            .list_jobs()
+            .list_jobs(None)
             .await?
             .into_iter()
             .filter(|j| {
@@ -368,13 +368,12 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn list_jobs(&self) -> Result<Vec<JobDescription>> {
+    async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
         // TODO: Maybe filter to one queue?
         debug!(job_queue_name = ?self.job_queue_name, "Listing jobs");
         // We must set a filter to get jobs in all states.
-        let cutoff_time = OffsetDateTime::now_utc() - time::Duration::days(7);
-        let cutoff_unix_millis = cutoff_time.unix_timestamp() * 1000;
+        let cutoff_unix_millis = since.map_or(0, |since| since.unix_timestamp() * 1000);
         let filters = KeyValuesPair::builder()
             .name("AFTER_CREATED_AT")
             .values(cutoff_unix_millis.to_string())

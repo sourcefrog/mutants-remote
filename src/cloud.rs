@@ -9,6 +9,7 @@ use std::{
 
 use async_trait::async_trait;
 use serde::Serialize;
+use time::OffsetDateTime;
 use tracing::error;
 
 use crate::job::{JobDescription, JobMetadata, JobName};
@@ -34,7 +35,7 @@ pub trait Cloud {
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
 
     /// List all jobs, including queued, running, and completed.
-    async fn list_jobs(&self) -> Result<Vec<JobDescription>>;
+    async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>>;
 
     /// Kill all jobs associated with a run.
     async fn kill(&self, run_id: &RunId) -> Result<()>;
