@@ -303,6 +303,8 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
 
 /// Tar up the source directory and return the temporary path to the tarball.
 async fn tar_source(source: &Path) -> Result<PathBuf> {
+    // TODO: Maybe do this in memory to avoid dependencies on the system tar? But, we still need to use
+    // it in the worker...
     let temp_dir = temp_dir();
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar")
@@ -311,8 +313,9 @@ async fn tar_source(source: &Path) -> Result<PathBuf> {
         .arg(&tarball_path)
         .arg("-C")
         .arg(source)
-        .arg("--exclude")
-        .arg("target")
+        .arg("--exclude-caches") // should get /target without false positives?
+        // .arg("--exclude")
+        // .arg("target")
         .arg(".")
         .spawn()
         .map_err(Error::Io)?;
