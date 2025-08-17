@@ -186,6 +186,7 @@ impl Cloud for AwsCloud {
             .key(self.source_tarball_key(run_id))
             .body(source_tarball_body)
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
+            .if_none_match("*") // must not exist
             .send()
             .await?;
         Ok(())
@@ -220,6 +221,7 @@ impl Cloud for AwsCloud {
             .put_object()
             .key(script_key.clone())
             .tagging(format!("{RUN_ID_TAG}={run_id}"))
+            .if_none_match("*") // must not exist
             .body(ByteStream::from(Bytes::from(wrapped_script)))
             .bucket(&self.s3_bucket_name)
             .send()
