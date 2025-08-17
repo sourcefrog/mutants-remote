@@ -1796,7 +1796,6 @@ dependencies = [
  "bytes",
  "clap",
  "derive_more",
- "fastrand",
  "hostname",
  "humantime",
  "serde",

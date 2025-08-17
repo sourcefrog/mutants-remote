@@ -323,18 +323,20 @@ fn setup_tracing(run_id: &RunId) {
 }
 
 impl RunId {
-    /// Generate a unique ID for a run.
+    /// Generate a probably-unique ID for a run.
     fn new() -> RunId {
         let now = OffsetDateTime::now_utc();
         let time_str = now
             .format(format_description!(
-                "[year][month][day][hour][minute][second]"
+                "[year][month][day]-[hour][minute][second]"
             ))
             .unwrap();
+        // Maybe it's quirky, but to make the strings easier to visually match,
+        // we encode fractional seconds in hex.
         RunId(format!(
-            "{time}-{random:04x}",
+            "{time}-{suffix:04x}",
             time = time_str,
-            random = fastrand::u16(..)
+            suffix = now.microsecond() & 0xFFFF
         ))
     }
 }
