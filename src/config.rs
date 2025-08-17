@@ -1,10 +1,17 @@
 //! Configuration files for mutants-remote.
 
-use std::path::Path;
+use std::{
+    env::home_dir,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
+use tracing::debug;
 
 use crate::{Error, Result};
+
+/// Default configuration file name, relative to home.
+static DEFAULT_CONFIG_FILE: &str = ".config/mutants-remote.toml";
 
 /// User-provided configuration.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -16,7 +23,25 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load from a file, or load from the default location, or use builtin defaults.
+    pub fn new(config_path: &Option<PathBuf>) -> Result<Self> {
+        if let Some(config_path) = config_path {
+            Self::from_file(config_path)
+        } else {
+            let default_path = home_dir()
+                .expect("Couldn't determine home dir")
+                .join(DEFAULT_CONFIG_FILE);
+            if default_path.exists() {
+                Self::from_file(&default_path)
+            } else {
+                debug!("No config file found, using defaults");
+                Ok(Self::default())
+            }
+        }
+    }
+
     pub(crate) fn from_file(config_path: &Path) -> Result<Self> {
+        debug!(?config_path, "Loading config from file");
         let config_str = std::fs::read_to_string(config_path).map_err(|err| {
             Error::Config(format!(
                 "Failed to load config file {}: {err}",

@@ -73,8 +73,9 @@ impl AwsCloud {
         let s3_bucket_name = config
             .aws_s3_bucket
             .clone()
-            .unwrap_or("mutants-tmp-0733-uswest2".to_string());
+            .expect("AWS S3 bucket name is required");
 
+        // TODO: Better default name?
         let job_queue_name = config
             .aws_batch_job_queue
             .clone()

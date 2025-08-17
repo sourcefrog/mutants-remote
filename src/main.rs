@@ -20,7 +20,7 @@ use time::{OffsetDateTime, macros::format_description};
 use tokio::process::Command;
 use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
@@ -45,6 +45,9 @@ struct Cli {
     command: Commands,
 
     /// Path to mutants-remote configuration file.
+    ///
+    /// If not provided, the default is ~/.config/mutants-remote.toml. If that does
+    /// not exist, built-in defaults will be used.
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 }
@@ -99,12 +102,8 @@ async fn inner_main() -> Result<()> {
     let run_id = RunId::new();
     setup_tracing(&run_id);
 
-    // TODO: Default path in ~/.config
-    let config = if let Some(config_path) = &cli.config {
-        Config::from_file(config_path)?
-    } else {
-        Config::default()
-    };
+    let config = Config::new(&cli.config)?;
+    debug!(?config);
     let cloud = open_cloud(&config).await?;
     let app = App {
         config,
