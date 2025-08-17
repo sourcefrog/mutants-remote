@@ -31,7 +31,8 @@ use crate::config::Config;
 mod error;
 use crate::error::Error;
 mod job;
-use crate::job::{JobName, JobStatus};
+use crate::job::{JobMetadata, JobName, JobStatus};
+mod tags;
 
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
@@ -128,6 +129,10 @@ struct App {
 
 impl App {
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
+        let source_dir_tail = source_dir
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned());
+        let job_metadata = JobMetadata { source_dir_tail };
         let source_tarball_path = tar_source(source_dir).await?;
         match self
             .cloud
@@ -151,7 +156,11 @@ impl App {
             shard_k,
         };
         info!(?job_name, "Submitting job");
-        let job_id = match self.cloud.submit_job(&job_name, script).await {
+        let job_id = match self
+            .cloud
+            .submit_job(&job_name, script, &job_metadata)
+            .await
+        {
             Ok(id) => id,
             Err(err) => {
                 error!("Failed to submit job: {err}");

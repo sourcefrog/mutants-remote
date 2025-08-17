@@ -57,6 +57,8 @@ pub struct JobDescription {
     #[serde(with = "time::serde::rfc3339::option")]
     pub stopped_at: Option<OffsetDateTime>,
     pub cloud_tags: Option<HashMap<String, String>>,
+    /// Structured metadata about the job.
+    pub job_metadata: Option<JobMetadata>,
 }
 
 impl JobDescription {
@@ -81,6 +83,13 @@ pub enum JobStatus {
     Completed,
     Failed,
     Unknown,
+}
+
+/// Additional metadata attached to a job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct JobMetadata {
+    /// The tail of the source directory path.
+    pub source_dir_tail: Option<String>,
 }
 
 #[cfg(test)]

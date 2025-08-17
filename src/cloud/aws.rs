@@ -27,8 +27,9 @@ use bytes::Bytes;
 use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 
-use super::{Cloud, CloudJobId, LogTail, RUN_ID_TAG};
-use crate::job::{JobDescription, JobName, JobStatus};
+use super::{Cloud, CloudJobId, LogTail};
+use crate::job::{JobDescription, JobMetadata, JobName, JobStatus};
+use crate::tags::{RUN_ID_TAG, SOURCE_DIR_TAIL_TAG};
 use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
 
 pub struct AwsCloud {
@@ -186,7 +187,12 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn submit_job(&self, job_name: &JobName, script: String) -> Result<CloudJobId> {
+    async fn submit_job(
+        &self,
+        job_name: &JobName,
+        script: String,
+        job_metadata: &JobMetadata,
+    ) -> Result<CloudJobId> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
         let run_id = &job_name.run_id;
@@ -246,6 +252,14 @@ impl Cloud for AwsCloud {
             .job_queue(&self.job_queue_name)
             .job_definition(&self.job_definition_name)
             .tags(RUN_ID_TAG, run_id.to_string())
+            .tags(
+                SOURCE_DIR_TAIL_TAG,
+                job_metadata
+                    .source_dir_tail
+                    .as_ref()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default(),
+            )
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides)
             .send()
@@ -285,6 +299,13 @@ impl Cloud for AwsCloud {
                 .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
                 .ok()
         });
+        let job_metadata = Some(JobMetadata {
+            source_dir_tail: job_detail
+                .tags
+                .as_ref()
+                .and_then(|tags| tags.get(SOURCE_DIR_TAIL_TAG))
+                .map(ToOwned::to_owned),
+        });
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
@@ -295,6 +316,7 @@ impl Cloud for AwsCloud {
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
             cloud_tags: job_detail.tags.clone(),
+            job_metadata,
         })
     }
 

@@ -11,13 +11,9 @@ use async_trait::async_trait;
 use serde::Serialize;
 use tracing::error;
 
-use crate::job::{JobDescription, JobName};
+use crate::job::{JobDescription, JobMetadata, JobName};
 use crate::{Result, RunId, cloud::aws::AwsCloud, config::Config};
 
-/// The name of a tag identifying a run, attached to jobs and other resources created for the run.
-///
-/// The value of the tag is the run ID.
-static RUN_ID_TAG: &str = "mutants-remote-run";
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
 pub mod aws;
@@ -27,7 +23,12 @@ pub mod aws;
 #[async_trait]
 pub trait Cloud {
     async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()>;
-    async fn submit_job(&self, job_name: &JobName, script: String) -> Result<CloudJobId>;
+    async fn submit_job(
+        &self,
+        job_name: &JobName,
+        script: String,
+        job_metadata: &JobMetadata,
+    ) -> Result<CloudJobId>;
     async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
