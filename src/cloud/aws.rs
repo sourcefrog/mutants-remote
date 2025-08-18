@@ -467,6 +467,7 @@ struct AwsLogTail {
     #[allow(dead_code)] // just for debugging?
     pub log_stream_name: String,
     response_stream: EventReceiver<StartLiveTailResponseStream, StartLiveTailResponseStreamError>,
+    warned_about_log_sampling: bool,
 }
 
 impl AwsLogTail {
@@ -491,6 +492,7 @@ impl AwsLogTail {
             // log_group_name: log_group_name.to_string(),
             log_stream_name: log_stream_name.to_string(),
             response_stream,
+            warned_about_log_sampling: false,
         }
     }
 }
@@ -512,8 +514,12 @@ impl crate::cloud::LogTail for AwsLogTail {
                     continue;
                 }
                 Ok(Some(StartLiveTailResponseStream::SessionUpdate(update))) => {
-                    if update.session_metadata().is_some_and(|m| m.sampled) {
+                    if update
+                        .session_metadata()
+                        .is_some_and(|m| m.sampled && !self.warned_about_log_sampling)
+                    {
                         warn!(?update, "Logs were sampled");
+                        self.warned_about_log_sampling = true;
                     }
                     return Ok(Some(
                         update
