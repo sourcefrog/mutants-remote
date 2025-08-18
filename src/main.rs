@@ -356,7 +356,7 @@ async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
         .arg(&tarball_path)
         .arg("-C")
         .arg(source)
-        .arg("--exclude-caches") // should get /target without false positives?
+        // .arg("--exclude-caches") // should get /target without false positives?
         // .arg("--exclude")
         // .arg("target")
         .arg(".")
