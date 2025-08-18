@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "Configuration for mutants-remote.\n\nThis is by default read from `~/.config/mutants-remote.toml`, or from the file specified by\n`--config`.",
+  "type": "object",
+  "properties": {
+    "aws_batch_job_definition": {
+      "description": "The name of the AWS Batch job definition to use.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aws_batch_job_queue": {
+      "description": "The name of the AWS Batch job queue to use.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aws_log_group_name": {
+      "description": "The AWS CloudWatch Logs group name to use.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aws_s3_bucket": {
+      "description": "The name of the bucket to store artifacts, including input source tarballs and results.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

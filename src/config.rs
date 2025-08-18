@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::debug;
 
@@ -13,12 +14,19 @@ use crate::{Error, Result};
 /// Default configuration file name, relative to home.
 static DEFAULT_CONFIG_FILE: &str = ".config/mutants-remote.toml";
 
-/// User-provided configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
+/// Configuration for mutants-remote.
+///
+/// This is by default read from `~/.config/mutants-remote.toml`, or from the file specified by
+/// `--config`.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Config {
+    /// The name of the bucket to store artifacts, including input source tarballs and results.
     pub aws_s3_bucket: Option<String>,
+    /// The name of the AWS Batch job queue to use.
     pub aws_batch_job_queue: Option<String>,
+    /// The name of the AWS Batch job definition to use.
     pub aws_batch_job_definition: Option<String>,
+    /// The AWS CloudWatch Logs group name to use.
     pub aws_log_group_name: Option<String>,
 }
 
@@ -63,6 +71,7 @@ mod tests {
     use std::io::Write;
 
     use assert_matches::assert_matches;
+    use schemars::schema_for;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -119,5 +128,11 @@ mod tests {
     fn parse_example_config_from_source_tree() {
         let _config = Config::from_file(Path::new("example/mutants-remote.toml")).unwrap();
         // it's enough that it just parses
+    }
+
+    #[test]
+    fn can_make_config_schema() {
+        let schema = schema_for!(Config);
+        let _schema_json = serde_json::to_string_pretty(&schema).unwrap();
     }
 }

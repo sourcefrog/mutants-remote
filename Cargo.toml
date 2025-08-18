@@ -31,6 +31,7 @@ toml = { version = "0.9.5", features = [
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 whoami = { version = "1.6.1", default-features = false }
+schemars = "1.0.4"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

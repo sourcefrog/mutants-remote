@@ -16,6 +16,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use schemars::schema_for;
 use serde::Serialize;
 use tempfile::TempDir;
 use time::{OffsetDateTime, macros::format_description};
@@ -68,6 +69,9 @@ enum Commands {
         #[arg(long, default_value = "10")]
         shards: u32,
     },
+
+    /// Print the JSON schema for the configuration file.
+    ConfigSchema {},
 
     /// List jobs
     #[command(alias = "ls")]
@@ -145,6 +149,7 @@ async fn inner_main() -> Result<()> {
         Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
         Commands::List { .. } => app.list().await,
         Commands::Kill { run_id } => app.kill(run_id).await,
+        Commands::ConfigSchema {} => app.emit_config_schema(),
     }
 }
 
@@ -158,6 +163,14 @@ struct App {
 }
 
 impl App {
+    fn emit_config_schema(&self) -> Result<()> {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&schema_for!(Config)).unwrap()
+        );
+        Ok(())
+    }
+
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
         let job_metadata = JobMetadata::new(source_dir);
         let source_tarball_path = tar_source(source_dir, &self.tempdir).await?;
