@@ -35,6 +35,7 @@ mod error;
 use crate::error::Error;
 mod job;
 use crate::job::{JobMetadata, JobName, JobStatus};
+mod shorttime;
 mod tags;
 
 static VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,7 +67,7 @@ enum Commands {
         source: PathBuf,
 
         /// Total number of shards
-        #[arg(long, default_value = "10")]
+        #[arg(long, default_value = "1")]
         shards: u32,
     },
 
@@ -172,6 +173,7 @@ impl App {
     }
 
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
+        assert_eq!(shards, 1, "Multiple shards are not supported yet");
         let job_metadata = JobMetadata::new(source_dir);
         let source_tarball_path = tar_source(source_dir, &self.tempdir).await?;
         debug!(
@@ -200,7 +202,7 @@ impl App {
             shard_k,
         };
         info!(?job_name, "Submitting job");
-        let job_id = match self
+        let cloud_job_id = match self
             .cloud
             .submit_job(&job_name, script, &job_metadata)
             .await
@@ -213,7 +215,7 @@ impl App {
         };
 
         // Monitor job
-        let _final_status = match monitor_job(self.cloud.as_ref(), &job_id).await {
+        let _final_status = match monitor_job(self.cloud.as_ref(), &cloud_job_id).await {
             Ok(status) => status,
             Err(err) => {
                 error!("Failed to monitor job: {err}");
@@ -275,7 +277,7 @@ impl App {
                         status = description.status,
                     );
                     if let Some(duration) = description.duration() {
-                        print!(" duration {}", humantime::format_duration(duration));
+                        print!(" duration {}", shorttime::format(duration));
                     }
                     println!();
                 } else {
