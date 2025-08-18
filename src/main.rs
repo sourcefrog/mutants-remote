@@ -132,7 +132,7 @@ async fn main() -> ExitCode {
 async fn inner_main() -> Result<()> {
     let cli = Cli::parse();
     let run_id = RunId::new();
-    let tempdir = TempDir::with_prefix(format!("{TOOL_NAME}-{run_id}"))?.keep();
+    let tempdir = TempDir::with_prefix(format!("{TOOL_NAME}-{run_id}-"))?.keep();
     setup_tracing(&tempdir);
 
     let config = Config::new(&cli.config)?;
