@@ -30,7 +30,7 @@ pub trait Cloud {
         script: String,
         job_metadata: &JobMetadata,
     ) -> Result<CloudJobId>;
-    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf>;
+    async fn fetch_output(&self, job_name: &JobName, dest: &Path) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
 

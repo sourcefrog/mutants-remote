@@ -9,14 +9,15 @@
 //!
 //! In future, one run may be split into multiple jobs, each of which runs a shard of mutants.
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{env::temp_dir, fs::File};
 
 use clap::{Parser, Subcommand};
 use serde::Serialize;
+use tempfile::TempDir;
 use time::{OffsetDateTime, macros::format_description};
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -126,7 +127,8 @@ async fn main() -> ExitCode {
 async fn inner_main() -> Result<()> {
     let cli = Cli::parse();
     let run_id = RunId::new();
-    setup_tracing(&run_id);
+    let tempdir = TempDir::with_prefix(format!("{TOOL_NAME}-{run_id}"))?.keep();
+    setup_tracing(&tempdir);
 
     let config = Config::new(&cli.config)?;
     debug!(?config);
@@ -136,6 +138,7 @@ async fn inner_main() -> Result<()> {
         cloud,
         cli,
         run_id,
+        tempdir,
     };
 
     match &app.cli.command {
@@ -151,12 +154,13 @@ struct App {
     cloud: Box<dyn Cloud>,
     cli: Cli,
     run_id: RunId,
+    tempdir: PathBuf,
 }
 
 impl App {
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
         let job_metadata = JobMetadata::new(source_dir);
-        let source_tarball_path = tar_source(source_dir).await?;
+        let source_tarball_path = tar_source(source_dir, &self.tempdir).await?;
         debug!(
             "Source tarball size: {}",
             source_tarball_path.metadata()?.len()
@@ -205,7 +209,7 @@ impl App {
         };
 
         // Fetch output
-        match self.cloud.fetch_output(&job_name).await {
+        match self.cloud.fetch_output(&job_name, &self.tempdir).await {
             Ok(output_path) => {
                 info!(
                     "Job completed successfully. Output available at: {}",
@@ -327,10 +331,9 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
 }
 
 /// Tar up the source directory and return the temporary path to the tarball.
-async fn tar_source(source: &Path) -> Result<PathBuf> {
+async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
     // TODO: Maybe do this in memory to avoid dependencies on the system tar? But, we still need to use
     // it in the worker...
-    let temp_dir = temp_dir();
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar")
         .arg("--zstd")
@@ -351,8 +354,8 @@ async fn tar_source(source: &Path) -> Result<PathBuf> {
     Ok(tarball_path)
 }
 
-fn setup_tracing(run_id: &RunId) {
-    let log_path = temp_dir().join(format!("{TOOL_NAME}-{}.log", run_id.0));
+fn setup_tracing(temp_path: &Path) {
+    let log_path = temp_path.join(format!("{TOOL_NAME}-debug.log",));
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)

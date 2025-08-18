@@ -411,7 +411,7 @@ impl Cloud for AwsCloud {
         Ok(jobs)
     }
 
-    async fn fetch_output(&self, job_name: &JobName) -> Result<PathBuf> {
+    async fn fetch_output(&self, job_name: &JobName, dest: &Path) -> Result<PathBuf> {
         let output_tarball_key = self.output_tarball_key(job_name);
 
         let output_tarball = self
@@ -423,7 +423,7 @@ impl Cloud for AwsCloud {
             .await?;
 
         let local_output_tarball_path =
-            std::env::temp_dir().join(format!("mutants-remote-output-{job_name}.tar.zstd",));
+            dest.join(format!("mutants-remote-output-{job_name}.tar.zstd"));
         let body = output_tarball.body.collect().await.unwrap().to_vec();
         tokio::fs::write(&local_output_tarball_path, body)
             .await
