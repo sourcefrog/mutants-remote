@@ -6,7 +6,12 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use super::RunId;
-use crate::cloud::CloudJobId;
+use crate::{
+    cloud::CloudJobId,
+    tags::{
+        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, SOURCE_DIR_TAIL_TAG,
+    },
+};
 
 /// Name assigned by us to a job within a run, including the run id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
@@ -133,6 +138,24 @@ impl JobMetadata {
             client_username: Some(whoami::username()),
             mutants_remote_version: Some(crate::VERSION.to_string()),
         }
+    }
+
+    /// Translate the metadata to a series of string tags.
+    pub fn to_tags(&self) -> Vec<(&'static str, String)> {
+        let mut tags = Vec::with_capacity(4);
+        if let Some(dir) = &self.source_dir_tail {
+            tags.push((SOURCE_DIR_TAIL_TAG, dir.to_string()));
+        }
+        if let Some(host) = &self.client_hostname {
+            tags.push((CLIENT_HOSTNAME_TAG, host.to_string()));
+        }
+        if let Some(user) = &self.client_username {
+            tags.push((CLIENT_USERNAME_TAG, user.to_string()));
+        }
+        if let Some(version) = &self.mutants_remote_version {
+            tags.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
+        }
+        tags
     }
 }
 

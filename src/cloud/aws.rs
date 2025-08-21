@@ -270,20 +270,8 @@ impl Cloud for AwsCloud {
             .tags(RUN_ID_TAG, run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides);
-        if let Some(source_dir_tail) = &job_metadata.source_dir_tail {
-            builder = builder.tags(SOURCE_DIR_TAIL_TAG, source_dir_tail.to_string());
-        }
-        if let Some(client_username) = &job_metadata.client_username {
-            builder = builder.tags(CLIENT_USERNAME_TAG, client_username.to_string());
-        }
-        if let Some(client_hostname) = &job_metadata.client_hostname {
-            builder = builder.tags(CLIENT_HOSTNAME_TAG, client_hostname.to_string());
-        }
-        if let Some(mutants_remote_version) = &job_metadata.mutants_remote_version {
-            builder = builder.tags(
-                MUTANTS_REMOTE_VERSION_TAG,
-                mutants_remote_version.to_string(),
-            );
+        for (key, value) in job_metadata.to_tags() {
+            builder = builder.tags(key, value);
         }
         let result = builder
             .send()
@@ -465,7 +453,10 @@ impl From<AwsJobStatus> for JobStatus {
             AwsJobStatus::Running => JobStatus::Running,
             AwsJobStatus::Succeeded => JobStatus::Completed,
             AwsJobStatus::Failed => JobStatus::Failed,
-            _ => JobStatus::Unknown,
+            _ => {
+                warn!("Unknown AWS job status: {status:?}");
+                JobStatus::Unknown
+            }
         }
     }
 }
