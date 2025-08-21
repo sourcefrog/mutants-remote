@@ -138,142 +138,109 @@ async fn inner_main() -> Result<()> {
     let config = Config::new(&cli.config)?;
     debug!(?config);
     let cloud = open_cloud(&config).await?;
-    let app = App {
-        config,
-        cloud,
-        cli,
-        run_id,
-        tempdir,
-    };
 
-    match &app.cli.command {
-        Commands::Run { source, shards } => app.run_jobs(source, *shards).await,
-        Commands::List { .. } => app.list().await,
-        Commands::Kill { run_id } => app.kill(run_id).await,
-        Commands::ConfigSchema {} => app.emit_config_schema(),
-    }
-}
+    match &cli.command {
+        Commands::Run { shards, source } => {
+            assert_eq!(*shards, 1, "Multiple shards are not supported yet");
+            let run_metadata = RunMetadata::new(source);
+            let source_tarball_path = tar_source(source, &tempdir).await?;
+            debug!(
+                "Source tarball size: {}",
+                source_tarball_path.metadata()?.len()
+            );
+            cloud
+                .upload_source_tarball(&run_id, &source_tarball_path)
+                .await
+                .inspect_err(|err| error!("Failed to upload source tarball: {err}"))?;
 
-struct App {
-    #[allow(dead_code)] // may be used later
-    config: Config,
-    cloud: Box<dyn Cloud>,
-    cli: Cli,
-    run_id: RunId,
-    tempdir: PathBuf,
-}
+            // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
-impl App {
-    fn emit_config_schema(&self) -> Result<()> {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&schema_for!(Config)).unwrap()
-        );
-        Ok(())
-    }
+            info!("Submitting job");
+            let (job_name, cloud_job_id) = cloud
+                .submit(&run_id, &run_metadata)
+                .await
+                .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
-    async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
-        assert_eq!(shards, 1, "Multiple shards are not supported yet");
-        let run_metadata = RunMetadata::new(source_dir);
-        let source_tarball_path = tar_source(source_dir, &self.tempdir).await?;
-        debug!(
-            "Source tarball size: {}",
-            source_tarball_path.metadata()?.len()
-        );
-        self.cloud
-            .upload_source_tarball(&self.run_id, &source_tarball_path)
-            .await
-            .inspect_err(|err| error!("Failed to upload source tarball: {err}"))?;
+            // Monitor job
+            let _final_status = monitor_job(cloud.as_ref(), &cloud_job_id)
+                .await
+                .inspect_err(|err| error!("Failed to monitor job: {err}"))?;
 
-        // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
-
-        info!("Submitting job");
-        let (job_name, cloud_job_id) = self
-            .cloud
-            .submit(&self.run_id, &run_metadata)
-            .await
-            .inspect_err(|err| error!("Failed to submit job: {err}"))?;
-
-        // Monitor job
-        let _final_status = monitor_job(self.cloud.as_ref(), &cloud_job_id)
-            .await
-            .inspect_err(|err| error!("Failed to monitor job: {err}"))?;
-
-        // Fetch output
-        match self.cloud.fetch_output(&job_name, &self.tempdir).await {
-            Ok(output_path) => {
-                info!(
-                    "Job completed successfully. Output available at: {}",
-                    output_path.display()
-                );
-            }
-            Err(err) => {
-                error!("Failed to fetch output: {err}");
-                return Err(err);
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn list(&self) -> Result<()> {
-        // TODO: Aggregate the jobs by run_id and just summarize the run by default?
-        let Commands::List {
-            json,
-            verbose,
-            ref since,
-        } = self.cli.command
-        else {
-            unreachable!()
-        };
-        let since = Some(
-            OffsetDateTime::now_utc()
-                - humantime::parse_duration(since).map_err(|err| {
-                    error!("Failed to parse duration {since:?}: {err}");
-                    Error::Argument(err.to_string())
-                })?,
-        );
-        let mut jobs = self.cloud.list_jobs(since).await?;
-        jobs.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then(a.job_name.cmp(&b.job_name))
-        });
-        if json {
-            println!("{}", serde_json::to_string_pretty(&jobs).unwrap());
-        } else {
-            for description in jobs {
-                if verbose {
-                    println!("{description:#?}");
-                } else if let Some(job_name) = &description.job_name {
-                    print!(
-                        "Run {run_id} shard {shard_k} status {status}",
-                        run_id = job_name.run_id,
-                        shard_k = job_name.shard_k,
-                        status = description.status,
+            // Fetch output
+            match cloud.fetch_output(&job_name, &tempdir).await {
+                Ok(output_path) => {
+                    info!(
+                        "Job completed successfully. Output available at: {}",
+                        output_path.display()
                     );
-                    if let Some(duration) = description.duration() {
-                        print!(" duration {}", shorttime::format(duration));
-                    } else if let Some(elapsed) = description.elapsed() {
-                        print!(" elapsed {}", shorttime::format(elapsed));
-                    }
-                    println!();
-                } else {
-                    println!(
-                        "Unrecognized job {cloud_job_id} status {status}",
-                        cloud_job_id = description.cloud_job_id,
-                        status = description.status
-                    );
+                }
+                Err(err) => {
+                    error!("Failed to fetch output: {err}");
+                    return Err(err);
                 }
             }
         }
-        Ok(())
-    }
 
-    async fn kill(&self, run_id: &RunId) -> Result<()> {
-        self.cloud.kill(run_id).await?;
-        Ok(())
-    }
+        Commands::List {
+            json,
+            verbose,
+            since,
+        } => {
+            let since = Some(
+                OffsetDateTime::now_utc()
+                    - humantime::parse_duration(since).map_err(|err| {
+                        error!("Failed to parse duration {since:?}: {err}");
+                        Error::Argument(err.to_string())
+                    })?,
+            );
+            let mut jobs = cloud.list_jobs(since).await?;
+            jobs.sort_by(|a, b| {
+                a.created_at
+                    .cmp(&b.created_at)
+                    .then(a.job_name.cmp(&b.job_name))
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&jobs).unwrap());
+            } else {
+                for description in jobs {
+                    if *verbose {
+                        println!("{description:#?}");
+                    } else if let Some(job_name) = &description.job_name {
+                        print!(
+                            "Run {run_id} shard {shard_k} status {status}",
+                            run_id = job_name.run_id,
+                            shard_k = job_name.shard_k,
+                            status = description.status,
+                        );
+                        if let Some(duration) = description.duration() {
+                            print!(" duration {}", shorttime::format(duration));
+                        } else if let Some(elapsed) = description.elapsed() {
+                            print!(" elapsed {}", shorttime::format(elapsed));
+                        }
+                        println!();
+                    } else {
+                        println!(
+                            "Unrecognized job {cloud_job_id} status {status}",
+                            cloud_job_id = description.cloud_job_id,
+                            status = description.status
+                        );
+                    }
+                }
+            }
+        }
+
+        Commands::Kill { run_id } => {
+            cloud.kill(run_id).await?;
+        }
+
+        Commands::ConfigSchema {} => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&schema_for!(Config)).unwrap()
+            );
+        }
+    };
+    Ok(())
 }
 
 async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus> {
