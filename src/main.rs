@@ -283,6 +283,7 @@ async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
     // TODO: Maybe do this in memory to avoid dependencies on the system tar, so that
     // we can exclude /target without false positives and without failing on non-GNU
     // tars? But, we still need to use the system tar in the workers...
+    debug!("Tarring source directory...");
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar")
         .arg("--zstd")
