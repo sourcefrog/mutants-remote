@@ -240,6 +240,9 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
         let status = job_description.status;
         if last_status != Some(status) {
             info!(?job_id, "Job status changed to {status}");
+            if let Some(reason) = &job_description.status_reason {
+                info!(?job_id, "Status reason: {reason}");
+            }
             last_status = Some(job_description.status);
         }
         match job_description.status {
