@@ -144,10 +144,6 @@ async fn inner_main() -> Result<()> {
             assert_eq!(*shards, 1, "Multiple shards are not supported yet");
             let run_metadata = RunMetadata::new(source);
             let source_tarball_path = tar_source(source, &tempdir).await?;
-            debug!(
-                "Source tarball size: {}",
-                source_tarball_path.metadata()?.len()
-            );
             cloud
                 .upload_source_tarball(&run_id, &source_tarball_path)
                 .await
@@ -186,14 +182,15 @@ async fn inner_main() -> Result<()> {
             verbose,
             since,
         } => {
-            let since = Some(
-                OffsetDateTime::now_utc()
-                    - humantime::parse_duration(since).map_err(|err| {
-                        error!("Failed to parse duration {since:?}: {err}");
-                        Error::Argument(err.to_string())
-                    })?,
-            );
-            let mut jobs = cloud.list_jobs(since).await?;
+            // TODO: Maybe just make since optional?
+            let since = humantime::parse_duration(since).map_err(|err| {
+                error!("Failed to parse duration {since:?}: {err}");
+                Error::Argument(err.to_string())
+            })?;
+            let since = OffsetDateTime::now_utc()
+                .checked_sub(since.try_into().unwrap())
+                .unwrap();
+            let mut jobs = cloud.list_jobs(Some(since)).await?;
             jobs.sort_by(|a, b| {
                 a.created_at
                     .cmp(&b.created_at)
@@ -312,6 +309,7 @@ async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
     if !exit_status.success() {
         return Err(Error::Tar(format!("tar failed: {exit_status}")));
     }
+    debug!("Source tarball size: {}", tarball_path.metadata()?.len());
     Ok(tarball_path)
 }
 
