@@ -376,12 +376,14 @@ fn setup_tracing(temp_path: &Path) {
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)
-        .with_file(true)
-        .with_line_number(true)
+        // .with_file(true)
+        // .with_line_number(true)
         .with_target(true)
         .with_level(true)
         .with_writer(log_file)
         .with_filter(filter_fn(|metadata| {
+            // AWS SDK logs are very verbose so we only want to see our own logs for now;
+            // maybe we should have a separate log file for them?
             metadata.target().starts_with("mutants_remote")
         }))
         .with_filter(LevelFilter::DEBUG);
@@ -389,6 +391,9 @@ fn setup_tracing(temp_path: &Path) {
         .with_target(true)
         .with_level(true)
         .with_writer(std::io::stderr)
+        .with_filter(filter_fn(|metadata| {
+            metadata.target().starts_with("mutants_remote")
+        }))
         .with_filter(LevelFilter::INFO); // EnvFilter::from_default_env());
     tracing::subscriber::set_global_default(
         tracing_subscriber::registry()
