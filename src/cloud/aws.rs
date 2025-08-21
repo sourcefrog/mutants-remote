@@ -205,19 +205,24 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn submit_job(
+    async fn submit(
         &self,
-        job_name: &JobName,
-        script: String,
-        job_metadata: &RunMetadata,
-    ) -> Result<CloudJobId> {
+        run_id: &RunId,
+        run_metadata: &RunMetadata,
+    ) -> Result<(JobName, CloudJobId)> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
-        let run_id = &job_name.run_id;
         let script_key = format!("{}/script.sh", self.run_prefix(run_id));
         let source_tarball_s3_url = self.source_tarball_s3_url(run_id);
-        let output_tarball_url = self.output_tarball_s3_url(job_name);
+        let shard_k = 0;
+        let shard_n = 1;
+        let job_name = JobName {
+            run_id: run_id.clone(),
+            shard_k,
+        };
+        let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
+        let script = format!("cargo mutants --in-place --shard {shard_k}/{shard_n} -vV || true");
         let wrapped_script = format!(
             "
             aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
@@ -270,7 +275,7 @@ impl Cloud for AwsCloud {
             .tags(RUN_ID_TAG, run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides);
-        for (key, value) in job_metadata.to_tags() {
+        for (key, value) in run_metadata.to_tags() {
             builder = builder.tags(key, value);
         }
         let result = builder
@@ -280,7 +285,7 @@ impl Cloud for AwsCloud {
 
         let job_id = result.job_id().unwrap().to_owned();
         info!(?job_id, "Job submitted successfully: {:?}", result);
-        Ok(CloudJobId(job_id))
+        Ok((job_name, CloudJobId(job_id)))
     }
 
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription> {

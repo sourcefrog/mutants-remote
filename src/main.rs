@@ -34,7 +34,7 @@ use crate::config::Config;
 mod error;
 use crate::error::Error;
 mod job;
-use crate::job::{JobName, JobStatus, RunMetadata};
+use crate::job::{JobStatus, RunMetadata};
 mod shorttime;
 mod tags;
 
@@ -187,17 +187,10 @@ impl App {
 
         // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
-        // Submit job
-        let shard_k = 0;
-        let script = format!("cargo mutants --in-place --shard {shard_k}/{shards} -vV || true");
-        let job_name = JobName {
-            run_id: self.run_id.clone(),
-            shard_k,
-        };
-        info!(?job_name, "Submitting job");
-        let cloud_job_id = self
+        info!("Submitting job");
+        let (job_name, cloud_job_id) = self
             .cloud
-            .submit_job(&job_name, script, &run_metadata)
+            .submit(&self.run_id, &run_metadata)
             .await
             .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
