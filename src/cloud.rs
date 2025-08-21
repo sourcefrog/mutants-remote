@@ -12,7 +12,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use tracing::error;
 
-use crate::job::{JobDescription, JobMetadata, JobName};
+use crate::job::{JobDescription, JobName, RunMetadata};
 use crate::{Result, RunId, cloud::aws::AwsCloud, config::Config};
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -28,7 +28,7 @@ pub trait Cloud {
         &self,
         job_name: &JobName,
         script: String,
-        job_metadata: &JobMetadata,
+        run_metadata: &RunMetadata,
     ) -> Result<CloudJobId>;
     async fn fetch_output(&self, job_name: &JobName, dest: &Path) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;

@@ -69,8 +69,8 @@ pub struct JobDescription {
     #[serde(with = "time::serde::rfc3339::option")]
     pub stopped_at: Option<OffsetDateTime>,
     pub cloud_tags: Option<HashMap<String, String>>,
-    /// Structured metadata about the job.
-    pub job_metadata: Option<JobMetadata>,
+    /// Structured metadata about the run this job is a part of.
+    pub run_metadata: Option<RunMetadata>,
 }
 
 impl JobDescription {
@@ -113,9 +113,9 @@ impl JobStatus {
     }
 }
 
-/// Additional metadata attached to a job.
+/// Additional metadata attached to all the resources in one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct JobMetadata {
+pub struct RunMetadata {
     /// The tail of the source directory path.
     pub source_dir_tail: Option<String>,
     /// The client hostname.
@@ -126,9 +126,9 @@ pub struct JobMetadata {
     pub mutants_remote_version: Option<String>,
 }
 
-impl JobMetadata {
+impl RunMetadata {
     pub fn new(source_dir: &Path) -> Self {
-        JobMetadata {
+        RunMetadata {
             source_dir_tail: source_dir
                 .file_name()
                 .map(|f| f.to_string_lossy().into_owned()),

@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::job::{JobDescription, JobMetadata, JobName, JobStatus};
+use crate::job::{JobDescription, JobName, JobStatus, RunMetadata};
 use crate::tags::{
     CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
     SOURCE_DIR_TAIL_TAG,
@@ -209,7 +209,7 @@ impl Cloud for AwsCloud {
         &self,
         job_name: &JobName,
         script: String,
-        job_metadata: &JobMetadata,
+        job_metadata: &RunMetadata,
     ) -> Result<CloudJobId> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
@@ -316,7 +316,7 @@ impl Cloud for AwsCloud {
             .tags
             .as_ref()
             .map_or_else(HashMap::new, HashMap::clone);
-        let job_metadata = Some(JobMetadata {
+        let run_metadata = Some(RunMetadata {
             source_dir_tail: tags.remove(SOURCE_DIR_TAIL_TAG),
             client_hostname: tags.remove(CLIENT_HOSTNAME_TAG),
             client_username: tags.remove(CLIENT_USERNAME_TAG),
@@ -333,7 +333,7 @@ impl Cloud for AwsCloud {
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
             cloud_tags: job_detail.tags.clone(),
-            job_metadata,
+            run_metadata,
         })
     }
 

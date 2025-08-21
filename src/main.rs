@@ -34,7 +34,7 @@ use crate::config::Config;
 mod error;
 use crate::error::Error;
 mod job;
-use crate::job::{JobMetadata, JobName, JobStatus};
+use crate::job::{JobName, JobStatus, RunMetadata};
 mod shorttime;
 mod tags;
 
@@ -174,7 +174,7 @@ impl App {
 
     async fn run_jobs(&self, source_dir: &Path, shards: u32) -> Result<()> {
         assert_eq!(shards, 1, "Multiple shards are not supported yet");
-        let job_metadata = JobMetadata::new(source_dir);
+        let run_metadata = RunMetadata::new(source_dir);
         let source_tarball_path = tar_source(source_dir, &self.tempdir).await?;
         debug!(
             "Source tarball size: {}",
@@ -197,7 +197,7 @@ impl App {
         info!(?job_name, "Submitting job");
         let cloud_job_id = self
             .cloud
-            .submit_job(&job_name, script, &job_metadata)
+            .submit_job(&job_name, script, &run_metadata)
             .await
             .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
