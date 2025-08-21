@@ -12,8 +12,9 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use tracing::error;
 
-use crate::job::{JobDescription, JobName, RunMetadata};
-use crate::{Result, RunId, cloud::aws::AwsCloud, config::Config};
+use crate::job::{JobDescription, JobName};
+use crate::run::{KillTarget, RunId, RunMetadata};
+use crate::{Result, cloud::aws::AwsCloud, config::Config};
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
@@ -37,7 +38,7 @@ pub trait Cloud {
     async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>>;
 
     /// Kill all jobs associated with a run.
-    async fn kill(&self, run_id: &RunId) -> Result<()>;
+    async fn kill(&self, run_filter: KillTarget) -> Result<()>;
 }
 
 /// Create a new cloud provider instance from the configuration.

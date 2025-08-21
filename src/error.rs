@@ -46,3 +46,5 @@ impl Error {
         Self::Path(err, path.into())
     }
 }
+
+pub type Result<T> = std::result::Result<T, Error>;

@@ -12,14 +12,12 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use schemars::schema_for;
-use serde::Serialize;
 use tempfile::TempDir;
-use time::{OffsetDateTime, macros::format_description};
+use time::OffsetDateTime;
 use tokio::process::Command;
 use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
@@ -27,16 +25,18 @@ use tracing::{debug, error, info};
 use tracing_subscriber::{Layer, filter::filter_fn, fmt, layer::SubscriberExt};
 
 mod cloud;
-use crate::cloud::open_cloud;
-use crate::cloud::{Cloud, CloudJobId};
 mod config;
-use crate::config::Config;
 mod error;
-use crate::error::Error;
 mod job;
-use crate::job::{JobStatus, RunMetadata};
+mod run;
 mod shorttime;
 mod tags;
+
+use crate::cloud::{Cloud, CloudJobId, open_cloud};
+use crate::config::Config;
+use crate::error::{Error, Result};
+use crate::job::JobStatus;
+use crate::run::{KillTarget, RunId, RunMetadata};
 
 static VERSION: &str = env!("CARGO_PKG_VERSION");
 static TOOL_NAME: &str = "mutants-remote";
@@ -94,27 +94,13 @@ enum Commands {
     /// Kill runs
     Kill {
         /// Run ID to kill
-        #[arg(long, short = 'i')]
-        run_id: RunId,
+        #[arg(long, short = 'i', required_unless_present = "all")]
+        run_id: Vec<RunId>,
+
+        /// Kill all runs
+        #[arg(long, conflicts_with = "run_id")]
+        all: bool,
     },
-}
-
-type Result<T> = std::result::Result<T, Error>;
-
-/// Identifier assigned by us to a run.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
-pub struct RunId(String);
-
-impl FromStr for RunId {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        if s.is_empty() {
-            Err(Error::InvalidRunId("Run ID cannot be empty".to_string()))
-        } else {
-            Ok(RunId(s.to_string()))
-        }
-    }
 }
 
 #[tokio::main]
@@ -131,7 +117,7 @@ async fn main() -> ExitCode {
 
 async fn inner_main() -> Result<()> {
     let cli = Cli::parse();
-    let run_id = RunId::new();
+    let run_id = RunId::from_clock();
     let tempdir = TempDir::with_prefix(format!("{TOOL_NAME}-{run_id}-"))?.keep();
     setup_tracing(&tempdir);
 
@@ -226,8 +212,13 @@ async fn inner_main() -> Result<()> {
             }
         }
 
-        Commands::Kill { run_id } => {
-            cloud.kill(run_id).await?;
+        Commands::Kill { run_id, all } => {
+            let what = if *all {
+                KillTarget::All
+            } else {
+                KillTarget::ById(run_id.to_owned())
+            };
+            cloud.kill(what).await?;
         }
 
         Commands::ConfigSchema {} => {
@@ -344,29 +335,4 @@ fn setup_tracing(temp_path: &Path) {
     )
     .unwrap();
     info!("Tracing initialized to file {}", log_path.display());
-}
-
-impl RunId {
-    /// Generate a probably-unique ID for a run.
-    fn new() -> RunId {
-        let now = OffsetDateTime::now_utc();
-        let time_str = now
-            .format(format_description!(
-                "[year][month][day]-[hour][minute][second]"
-            ))
-            .unwrap();
-        // Maybe it's quirky, but to make the strings easier to visually match,
-        // we encode fractional seconds in hex.
-        RunId(format!(
-            "{time}-{suffix:04x}",
-            time = time_str,
-            suffix = now.microsecond() & 0xFFFF
-        ))
-    }
-}
-
-impl std::fmt::Display for RunId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }

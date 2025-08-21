@@ -1,17 +1,14 @@
+// Copyright 2025 Martin Pool
+
 //! Cloud-independent job description and identifiers.
 
-use std::{collections::HashMap, path::Path, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 use serde::Serialize;
 use time::OffsetDateTime;
 
 use super::RunId;
-use crate::{
-    cloud::CloudJobId,
-    tags::{
-        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, SOURCE_DIR_TAIL_TAG,
-    },
-};
+use crate::{cloud::CloudJobId, run::RunMetadata};
 
 /// Name assigned by us to a job within a run, including the run id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
@@ -35,7 +32,7 @@ impl FromStr for JobName {
         if parts.len() != 2 {
             return Err("Job name doesn't look like {run_id}-shard-{shard_k}");
         }
-        let run_id = RunId(parts[0].to_owned()); // For now assume anything's valid
+        let run_id = RunId::from_str(parts[0]).map_err(|_| "Invalid run ID")?;
         let shard_k = parts[1].parse().map_err(|_| "Invalid shard number")?;
         Ok(JobName { run_id, shard_k })
     }
@@ -85,7 +82,7 @@ impl JobDescription {
 
     /// If the job is still running or pending, return the duration since it started.
     pub fn elapsed(&self) -> Option<std::time::Duration> {
-        if !self.status.is_terminal() {
+        if !self.status.is_dead() {
             self.created_at
                 .and_then(|t| (OffsetDateTime::now_utc() - t).try_into().ok())
         } else {
@@ -108,54 +105,20 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, JobStatus::Completed | JobStatus::Failed)
-    }
-}
-
-/// Additional metadata attached to all the resources in one run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RunMetadata {
-    /// The tail of the source directory path.
-    pub source_dir_tail: Option<String>,
-    /// The client hostname.
-    pub client_hostname: Option<String>,
-    /// The local user name on the client.
-    pub client_username: Option<String>,
-    /// The version of mutants-remote that created this job.
-    pub mutants_remote_version: Option<String>,
-}
-
-impl RunMetadata {
-    pub fn new(source_dir: &Path) -> Self {
-        RunMetadata {
-            source_dir_tail: source_dir
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned()),
-            client_hostname: hostname::get()
-                .ok()
-                .map(|h| h.to_string_lossy().into_owned()),
-            client_username: Some(whoami::username()),
-            mutants_remote_version: Some(crate::VERSION.to_string()),
+    pub fn is_dead(&self) -> bool {
+        match self {
+            JobStatus::Completed | JobStatus::Failed => true,
+            JobStatus::Submitted
+            | JobStatus::Pending
+            | JobStatus::Starting
+            | JobStatus::Runnable
+            | JobStatus::Running => false,
+            JobStatus::Unknown => false,
         }
     }
 
-    /// Translate the metadata to a series of string tags.
-    pub fn to_tags(&self) -> Vec<(&'static str, String)> {
-        let mut tags = Vec::with_capacity(4);
-        if let Some(dir) = &self.source_dir_tail {
-            tags.push((SOURCE_DIR_TAIL_TAG, dir.to_string()));
-        }
-        if let Some(host) = &self.client_hostname {
-            tags.push((CLIENT_HOSTNAME_TAG, host.to_string()));
-        }
-        if let Some(user) = &self.client_username {
-            tags.push((CLIENT_USERNAME_TAG, user.to_string()));
-        }
-        if let Some(version) = &self.mutants_remote_version {
-            tags.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
-        }
-        tags
+    pub fn is_alive(&self) -> bool {
+        *self != JobStatus::Unknown && !self.is_dead()
     }
 }
 
@@ -165,7 +128,7 @@ mod tests {
 
     #[test]
     fn job_name_parsing() {
-        let run_id = RunId("20250102030405-abcd".to_string());
+        let run_id = RunId::from_str("20250102030405-abcd").unwrap();
         let shard_k = 13;
         let job_name = JobName {
             run_id: run_id.clone(),

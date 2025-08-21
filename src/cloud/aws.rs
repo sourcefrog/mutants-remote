@@ -30,10 +30,11 @@ use crate::tags::{
     CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
     SOURCE_DIR_TAIL_TAG,
 };
-use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
+use crate::{Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME};
 use crate::{
     config::Config,
-    job::{JobDescription, JobName, JobStatus, RunMetadata},
+    job::{JobDescription, JobName, JobStatus},
+    run::{KillTarget, RunId, RunMetadata},
 };
 
 pub struct AwsCloud {
@@ -364,17 +365,22 @@ impl Cloud for AwsCloud {
         })
     }
 
-    async fn kill(&self, run_id: &RunId) -> Result<()> {
-        debug!("Killing run {}", run_id);
+    async fn kill(&self, kill_target: KillTarget) -> Result<()> {
+        debug!(?kill_target);
         let jobs_to_kill = self
             .list_jobs(None)
             .await?
             .into_iter()
-            .filter(|j| {
-                j.job_name.as_ref().is_some_and(|n| n.run_id == *run_id)
-                    && !matches!(j.status, JobStatus::Completed | JobStatus::Failed)
+            .filter(|j| j.status.is_alive())
+            .filter(|j| match &kill_target {
+                KillTarget::All => true,
+                KillTarget::ById(kill_ids) => j
+                    .job_name
+                    .as_ref()
+                    .is_some_and(|n| kill_ids.contains(&n.run_id)),
             })
             .collect::<Vec<_>>();
+        info!("Found {} jobs to kill", jobs_to_kill.len());
         let mut n_killed = 0;
         for job in jobs_to_kill {
             let job_name = job.job_name;
