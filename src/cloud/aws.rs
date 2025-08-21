@@ -169,6 +169,20 @@ impl AwsCloud {
             tool_version = crate::VERSION
         )
     }
+
+    async fn put_object(&self, key: &str, content: ByteStream, run_id: &RunId) -> Result<()> {
+        debug!(?key, "Upload {} bytes", content.size_hint().0);
+        self.s3_client
+            .put_object()
+            .key(key.to_owned())
+            .tagging(self.s3_tagging(run_id))
+            .if_none_match("*") // must not exist
+            .body(content)
+            .bucket(&self.s3_bucket_name)
+            .send()
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -182,15 +196,12 @@ impl Cloud for AwsCloud {
             );
             Error::Cloud(err.into())
         })?;
-        self.s3_client
-            .put_object()
-            .bucket(&self.s3_bucket_name)
-            .key(self.source_tarball_key(run_id))
-            .body(source_tarball_body)
-            .if_none_match("*") // must not exist
-            .tagging(self.s3_tagging(run_id))
-            .send()
-            .await?;
+        self.put_object(
+            &self.source_tarball_key(run_id),
+            source_tarball_body,
+            run_id,
+        )
+        .await?;
         Ok(())
     }
 
@@ -218,16 +229,13 @@ impl Cloud for AwsCloud {
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
         );
+        self.put_object(
+            &script_key,
+            ByteStream::from(Bytes::from(wrapped_script)),
+            run_id,
+        )
+        .await?;
 
-        self.s3_client
-            .put_object()
-            .key(script_key.clone())
-            .tagging(self.s3_tagging(&job_name.run_id))
-            .if_none_match("*") // must not exist
-            .body(ByteStream::from(Bytes::from(wrapped_script)))
-            .bucket(&self.s3_bucket_name)
-            .send()
-            .await?;
         let script_s3_url = self.s3_url(&script_key);
         let full_command = format!(
             "aws s3 cp {script_s3_url} /tmp/script.sh &&
