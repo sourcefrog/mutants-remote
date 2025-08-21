@@ -180,17 +180,10 @@ impl App {
             "Source tarball size: {}",
             source_tarball_path.metadata()?.len()
         );
-        match self
-            .cloud
+        self.cloud
             .upload_source_tarball(&self.run_id, &source_tarball_path)
             .await
-        {
-            Ok(()) => {}
-            Err(err) => {
-                error!("Failed to upload source tarball: {err}");
-                return Err(err);
-            }
-        }
+            .inspect_err(|err| error!("Failed to upload source tarball: {err}"))?;
 
         // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
@@ -202,26 +195,16 @@ impl App {
             shard_k,
         };
         info!(?job_name, "Submitting job");
-        let cloud_job_id = match self
+        let cloud_job_id = self
             .cloud
             .submit_job(&job_name, script, &job_metadata)
             .await
-        {
-            Ok(id) => id,
-            Err(err) => {
-                error!("Failed to submit job: {err}");
-                return Err(err);
-            }
-        };
+            .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
         // Monitor job
-        let _final_status = match monitor_job(self.cloud.as_ref(), &cloud_job_id).await {
-            Ok(status) => status,
-            Err(err) => {
-                error!("Failed to monitor job: {err}");
-                return Err(err);
-            }
-        };
+        let _final_status = monitor_job(self.cloud.as_ref(), &cloud_job_id)
+            .await
+            .inspect_err(|err| error!("Failed to monitor job: {err}"))?;
 
         // Fetch output
         match self.cloud.fetch_output(&job_name, &self.tempdir).await {
@@ -349,8 +332,9 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
 
 /// Tar up the source directory and return the temporary path to the tarball.
 async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
-    // TODO: Maybe do this in memory to avoid dependencies on the system tar? But, we still need to use
-    // it in the worker...
+    // TODO: Maybe do this in memory to avoid dependencies on the system tar, so that
+    // we can exclude /target without false positives and without failing on non-GNU
+    // tars? But, we still need to use the system tar in the workers...
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar")
         .arg("--zstd")
