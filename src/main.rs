@@ -60,7 +60,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Remotely test cargo-mutants on a source directory
-    #[command(alias = "r")]
+    #[command(visible_alias = "r")]
     Run {
         /// Source directory to run mutants on
         #[arg(long, short = 'd')]
@@ -75,7 +75,7 @@ enum Commands {
     ConfigSchema {},
 
     /// List jobs
-    #[command(alias = "ls")]
+    #[command(visible_alias = "ls")]
     List {
         // TODO: Options for the queue, cutoff time, other filters?
         /// List all known fields.
