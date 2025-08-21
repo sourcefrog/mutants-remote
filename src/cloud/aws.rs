@@ -263,7 +263,7 @@ impl Cloud for AwsCloud {
                 "-exc".to_owned(),
                 full_command,
             ]))
-            .set_name(Some("root".to_owned())) // container name
+            .set_name(Some("mutants-remote".to_owned())) // container name
             ;
         if let Some(vcpus) = self.config.vcpus {
             task_container_overrides = task_container_overrides.resource_requirements(
