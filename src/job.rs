@@ -77,6 +77,16 @@ impl JobDescription {
             _ => None,
         }
     }
+
+    /// If the job is still running or pending, return the duration since it started.
+    pub fn elapsed(&self) -> Option<std::time::Duration> {
+        if !self.status.is_terminal() {
+            self.created_at
+                .and_then(|t| (OffsetDateTime::now_utc() - t).try_into().ok())
+        } else {
+            None
+        }
+    }
 }
 
 /// Describes the status of a job.
@@ -90,6 +100,12 @@ pub enum JobStatus {
     Completed,
     Failed,
     Unknown,
+}
+
+impl JobStatus {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, JobStatus::Completed | JobStatus::Failed)
+    }
 }
 
 /// Additional metadata attached to a job.

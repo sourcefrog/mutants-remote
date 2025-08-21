@@ -278,6 +278,8 @@ impl App {
                     );
                     if let Some(duration) = description.duration() {
                         print!(" duration {}", shorttime::format(duration));
+                    } else if let Some(elapsed) = description.elapsed() {
+                        print!(" elapsed {}", shorttime::format(elapsed));
                     }
                     println!();
                 } else {
