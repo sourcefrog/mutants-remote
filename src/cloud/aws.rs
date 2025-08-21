@@ -13,8 +13,8 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::{
     error::SdkError,
     types::{
-        EcsPropertiesOverride, JobStatus as AwsJobStatus, KeyValuesPair, TaskContainerOverrides,
-        TaskPropertiesOverride,
+        EcsPropertiesOverride, JobStatus as AwsJobStatus, KeyValuesPair, ResourceRequirement,
+        ResourceType, TaskContainerOverrides, TaskPropertiesOverride,
     },
 };
 use aws_sdk_cloudwatchlogs::primitives::event_stream::EventReceiver;
@@ -26,12 +26,15 @@ use time::OffsetDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::job::{JobDescription, JobName, JobStatus, RunMetadata};
 use crate::tags::{
     CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
     SOURCE_DIR_TAIL_TAG,
 };
 use crate::{Error, Result, RunId, SOURCE_TARBALL_NAME, TOOL_NAME};
+use crate::{
+    config::Config,
+    job::{JobDescription, JobName, JobStatus, RunMetadata},
+};
 
 pub struct AwsCloud {
     account_id: String,
@@ -43,10 +46,11 @@ pub struct AwsCloud {
     job_queue_name: String,
     job_definition_name: String,
     log_group_name: String,
+    config: Config,
 }
 
 impl AwsCloud {
-    pub async fn new(config: crate::Config) -> Result<Self> {
+    pub async fn new(config: Config) -> Result<Self> {
         let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(region_provider)
@@ -120,6 +124,7 @@ impl AwsCloud {
             job_queue_name,
             job_definition_name,
             log_group_name,
+            config: config.clone(),
         })
     }
 
@@ -225,6 +230,7 @@ impl Cloud for AwsCloud {
         let script = format!("cargo mutants --in-place --shard {shard_k}/{shard_n} -vV || true");
         let wrapped_script = format!(
             "
+            free -m && cat /proc/cpuinfo &&
             aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
             mkdir /work &&
             cd /work &&
@@ -250,14 +256,31 @@ impl Cloud for AwsCloud {
         debug!(?script_s3_url, "Uploading script to S3");
 
         info!("Submitting job");
-        let task_container_overrides = TaskContainerOverrides::builder()
+        let mut task_container_overrides = TaskContainerOverrides::builder()
             .set_command(Some(vec![
                 "bash".to_owned(),
                 "-exc".to_owned(),
                 full_command,
             ]))
             .set_name(Some("root".to_owned())) // container name
-            .build();
+            ;
+        if let Some(vcpus) = self.config.vcpus {
+            task_container_overrides = task_container_overrides.resource_requirements(
+                ResourceRequirement::builder()
+                    .r#type(ResourceType::Vcpu)
+                    .value(vcpus.to_string())
+                    .build(),
+            )
+        }
+        if let Some(memory) = self.config.memory {
+            task_container_overrides = task_container_overrides.resource_requirements(
+                ResourceRequirement::builder()
+                    .r#type(ResourceType::Memory)
+                    .value(memory.to_string())
+                    .build(),
+            )
+        }
+        let task_container_overrides = task_container_overrides.build();
         let task_properties_overrides = TaskPropertiesOverride::builder()
             .containers(task_container_overrides)
             .build();
@@ -265,7 +288,6 @@ impl Cloud for AwsCloud {
             .task_properties(task_properties_overrides)
             .build();
 
-        // TODO: Also a job id tag?
         let mut builder = self
             .batch_client
             .submit_job()

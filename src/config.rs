@@ -28,6 +28,11 @@ pub struct Config {
     pub aws_batch_job_definition: Option<String>,
     /// The AWS CloudWatch Logs group name to use.
     pub aws_log_group_name: Option<String>,
+
+    /// Number of virtual CPU cores per job.
+    pub vcpus: Option<u32>,
+    /// Memory in megabytes per job.
+    pub memory: Option<u32>,
 }
 
 impl Config {
