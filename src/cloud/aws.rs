@@ -233,6 +233,9 @@ impl Cloud for AwsCloud {
             "
             free -m && id && pwd && df -m &&
             cd &&
+            pwd &&
+            echo $HOME &&
+            export CARGO_HOME=$HOME/.cargo &&
             aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
             mkdir work &&
             cd work &&
