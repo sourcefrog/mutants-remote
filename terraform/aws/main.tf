@@ -12,6 +12,11 @@ resource "aws_batch_job_definition" "mutants-amd64" {
   }
   platform_capabilities = ["FARGATE"]
   ecs_properties = jsonencode({
+    platformVersion = "LATEST"
+    runtimePlatform = {
+      cpuArchitecture       = "X86_64" # TODO: support ARM64 when the mutants image supports it
+      operatingSystemFamily = "LINUX"
+    }
     taskProperties = [
       {
         executionRoleArn = "arn:aws:iam::${local.account_id}:role/mutants-batch-execution"
@@ -37,6 +42,9 @@ resource "aws_batch_job_definition" "mutants-amd64" {
                 value = "${var.memory}"
               }
             ]
+            dependsOn   = []
+            environment = []
+            mountPoints = []
           }
         ]
       }
