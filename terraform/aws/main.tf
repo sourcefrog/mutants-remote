@@ -25,15 +25,16 @@ resource "aws_batch_job_definition" "mutants-amd64" {
             command = ["cargo", "mutants", "--version"] # expected to be overridden per job
             image   = "${local.account_id}.dkr.ecr.us-west-2.amazonaws.com/github/sourcefrog/cargo-mutants:container"
             # image = "ghcr.io/sourcefrog/cargo-mutants:container"
-            user  = "mutants"
+            user = "mutants"
             resourceRequirements = [
+              # See https://docs.aws.amazon.com/batch/latest/APIReference/API_ResourceRequirement.html
               {
                 type  = "VCPU"
-                value = "2"
+                value = "16"
               },
               {
                 type  = "MEMORY"
-                value = "4096"
+                value = "32768"
               }
             ]
           }
