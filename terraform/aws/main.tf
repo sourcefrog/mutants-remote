@@ -4,8 +4,12 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
 }
 
-resource "aws_batch_job_definition" "mutants-amd64" {
-  name = "mutants-amd64"
+resource "aws_batch_job_definition" "mutants" {
+  for_each = tomap({
+    amd64 = "X86_64"
+    arm64 = "ARM64"
+  })
+  name = "mutants-${each.key}"
   type = "container"
   timeout {
     attempt_duration_seconds = 7200
@@ -13,7 +17,7 @@ resource "aws_batch_job_definition" "mutants-amd64" {
   platform_capabilities = ["FARGATE"]
   ecs_properties = jsonencode({
     runtimePlatform = {
-      cpuArchitecture       = "X86_64" # TODO: support ARM64 when the mutants image supports it
+      cpuArchitecture       = each.value
       operatingSystemFamily = "LINUX"
     }
     taskProperties = [

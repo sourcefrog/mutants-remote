@@ -2,5 +2,5 @@ aws_s3_bucket = "mutants-remote-tmp-123456789" # "mutants-tmp-0733-uswest2"
 aws_batch_job_queue = "mutants0-amd64"
 vcpus = 4
 memory = 16384
-aws_batch_job_definition = "mutants0-amd64"
+aws_batch_job_definition = "mutants-amd64"
 aws_log_group_name = "/aws/batch/job"

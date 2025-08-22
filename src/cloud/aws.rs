@@ -82,7 +82,7 @@ impl AwsCloud {
         let job_definition_name = config
             .aws_batch_job_definition
             .clone()
-            .unwrap_or("mutants0-amd64".to_string());
+            .unwrap_or("mutants-amd64".to_string());
 
         let log_group_name = config
             .aws_log_group_name
