@@ -144,22 +144,27 @@ async fn inner_main() -> Result<()> {
                 .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
             // Monitor job
-            let _final_status = monitor_job(cloud.as_ref(), &cloud_job_id)
+            let (_final_status, started_running) = monitor_job(cloud.as_ref(), &cloud_job_id)
                 .await
                 .inspect_err(|err| error!("Failed to monitor job: {err}"))?;
 
-            // Fetch output
-            match cloud.fetch_output(&job_name, &tempdir).await {
-                Ok(output_path) => {
-                    info!(
-                        "Job completed successfully. Output available at: {}",
-                        output_path.display()
-                    );
+            // Fetch output, only if it ever successfully launched.
+            if started_running {
+                match cloud.fetch_output(&job_name, &tempdir).await {
+                    Ok(output_path) => {
+                        info!(
+                            "Job completed successfully. Output available at: {}",
+                            output_path.display()
+                        );
+                    }
+                    Err(err) => {
+                        error!("Failed to fetch output: {err}");
+                        return Err(err);
+                    }
                 }
-                Err(err) => {
-                    error!("Failed to fetch output: {err}");
-                    return Err(err);
-                }
+            } else {
+                info!("Job did not start running.");
+                return Err(Error::JobDidNotStart);
             }
         }
 
@@ -231,10 +236,11 @@ async fn inner_main() -> Result<()> {
     Ok(())
 }
 
-async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus> {
+async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<(JobStatus, bool)> {
     let mut last_status: Option<JobStatus> = None;
     let mut log_tail = None;
     let mut _logs_ended = false;
+    let mut started_running = false;
     loop {
         let job_description = cloud.describe_job(job_id).await?;
         let status = job_description.status;
@@ -248,9 +254,10 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<JobStatus
         match job_description.status {
             JobStatus::Completed | JobStatus::Failed => {
                 // TODO: Maybe wait just a little longer for the last logs? But, we don't seem to reliably detect the end of the logs.
-                return Ok(job_description.status);
+                return Ok((job_description.status, started_running));
             }
             JobStatus::Running => {
+                started_running = true;
                 if log_tail.is_none() && job_description.log_stream_name.is_some() {
                     log_tail = Some(cloud.tail_log(&job_description).await?);
                 }

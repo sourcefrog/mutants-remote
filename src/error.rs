@@ -28,6 +28,8 @@ pub enum Error {
 
     #[error("Tar failed: {0}")]
     Tar(String),
+    #[error("Job did not start running")]
+    JobDidNotStart,
     // #[allow(dead_code)]
     // #[error("Job failed with status: {0}")]
     // JobFailed(String),
