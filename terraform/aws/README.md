@@ -2,6 +2,8 @@
 
 The Terraform module in this directory will configure some of the static resources required to run mutants-remote on AWS.
 
+Resources are created in the account and the default region of the credentials provided when running Terraform.
+
 ## Building infrastructure
 
 Before applying this module, you must first create an AWS account and obtain the necessary credentials. It is  strongly recommended that you create a dedicated account for mutants-remote.
@@ -29,12 +31,16 @@ Three different IAM principals are used in mutants-remote:
 - `mutants-batch-execution`: This role is assumed by the AWS Batch infrastructure and used to launch containers. It has permission to read containers and to rite logs.
 - `mutants-batch-task`: This role is accessible to the batch jobs, and is used to read and write S3 files.
 
+## Resource overview
+
+- Bucket holding temporary input and output files, with auto-expiry of objects and a public access block
+- Task and execution roles for AWS Batch
+- AWS Batch job definition
+
 ## TODO
 
 The following resources are not yet automated:
 
-- Create submission role
-- IAM roles, groups, and policies
+- Submission role: it's a bit unclear how to vend access to the submission role
 - Compute environment
 - Batch queue
-- S3 bucket

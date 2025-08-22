@@ -118,3 +118,29 @@ resource "aws_iam_role_policy_attachments_exclusive" "task" {
     aws_iam_policy.task.arn,
   ]
 }
+
+resource "aws_s3_bucket" "tmp" {
+  # Bucket holding temporary input and output files, with auto-expiry
+  bucket_prefix = "mutants-remote-tmp-"
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "expiry" {
+  bucket = aws_s3_bucket.tmp.id
+  rule {
+    id     = "expire-after-30-days"
+    status = "Enabled"
+    filter {}
+    expiration {
+      days = 30
+    }
+  }
+  # TODO: Maybe expire source tarballs faster?
+}
+
+resource "aws_s3_bucket_public_access_block" "tmp" {
+  bucket                  = aws_s3_bucket.tmp.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
