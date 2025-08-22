@@ -30,11 +30,11 @@ resource "aws_batch_job_definition" "mutants-amd64" {
               # See https://docs.aws.amazon.com/batch/latest/APIReference/API_ResourceRequirement.html
               {
                 type  = "VCPU"
-                value = "16"
+                value = "${var.vcpu}"
               },
               {
                 type  = "MEMORY"
-                value = "32768"
+                value = "${var.memory}"
               }
             ]
           }

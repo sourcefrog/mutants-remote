@@ -12,6 +12,14 @@ With admin credentials in your environment, run `terraform init` and then `terra
 
 After making changes or fetching new code, run `terraform apply` again to update the infrastructure.
 
+## Setting values
+
+Some variables can be customized, by setting `-var` flags when running `terraform apply` or by [other means](https://developer.hashicorp.com/terraform/language/values/variables):
+
+```
+terraform apply -var="memory=8192"
+```
+
 ## IAM overview
 
 Three different IAM principals are used in mutants-remote:
