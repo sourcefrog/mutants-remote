@@ -24,6 +24,8 @@ resource "aws_batch_job_definition" "mutants-amd64" {
             name    = "mutants-remote"
             command = ["cargo", "mutants", "--version"] # expected to be overridden per job
             image   = "${local.account_id}.dkr.ecr.us-west-2.amazonaws.com/github/sourcefrog/cargo-mutants:container"
+            # image = "ghcr.io/sourcefrog/cargo-mutants:container"
+            user  = "mutants"
             resourceRequirements = [
               {
                 type  = "VCPU"
