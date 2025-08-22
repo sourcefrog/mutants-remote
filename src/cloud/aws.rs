@@ -231,10 +231,11 @@ impl Cloud for AwsCloud {
         let script = format!("cargo mutants --in-place --shard {shard_k}/{shard_n} -vV || true");
         let wrapped_script = format!(
             "
-            free -m && cat /proc/cpuinfo &&
+            free -m && id && pwd && df -m &&
+            cd &&
             aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
-            mkdir /work &&
-            cd /work &&
+            mkdir work &&
+            cd work &&
             tar xf /tmp/mutants.tar.zst --zstd &&
             {script}
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
