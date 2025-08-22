@@ -58,6 +58,54 @@ resource "aws_batch_job_definition" "mutants" {
   })
 }
 
+resource "aws_batch_job_queue" "queue" {
+  name     = "mutants"
+  priority = 10
+  state    = "ENABLED"
+  compute_environment_order {
+    order               = 1
+    compute_environment = aws_batch_compute_environment.compute.arn
+  }
+}
+
+resource "aws_batch_compute_environment" "compute" {
+  name = "mutants"
+  type = "MANAGED"
+  compute_resources {
+    max_vcpus          = var.max_vcpus
+    type               = "FARGATE"
+    security_group_ids = [aws_security_group.tasks-egress.id]
+    subnets            = [aws_subnet.tasks.id]
+  }
+}
+
+resource "aws_vpc" "tasks" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "tasks" {
+  cidr_block = "10.0.0.0/16"
+  vpc_id     = aws_vpc.tasks.id
+}
+
+resource "aws_security_group" "tasks-egress" {
+  name        = "mutants"
+  description = "Security group for mutants-remote ECS tasks"
+  vpc_id      = aws_vpc.tasks.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "all-ipv4" {
+  security_group_id = aws_security_group.tasks-egress.id
+  ip_protocol       = -1
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "all-ipv6" {
+  security_group_id = aws_security_group.tasks-egress.id
+  ip_protocol       = -1
+  cidr_ipv6         = "::/0"
+}
+
 resource "aws_iam_role" "execution" {
   name        = var.execution_role_name
   description = "Execution role for mutants-remote ECS tasks, allowing them to fetch container images and write logs"
