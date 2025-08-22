@@ -9,3 +9,15 @@ variable "memory" {
   description = "The amount of memory in GB for each batch worker instance. Valid combinations with vCPU are listed in the AWS documentation."
   default     = 32768
 }
+
+variable "execution_role_name" {
+  type        = string
+  description = "The name of the execution role for the batch worker. This role is used to launch the batch worker instances."
+  default     = "mutants-batch-execution"
+}
+
+variable "task_role_name" {
+  type        = string
+  description = "The name of the task role for the batch worker. This role is available to code running in the batch worker instances."
+  default     = "mutants-batch-task"
+}

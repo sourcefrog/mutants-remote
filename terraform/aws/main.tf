@@ -12,17 +12,17 @@ resource "aws_batch_job_definition" "mutants-amd64" {
   }
   platform_capabilities = ["FARGATE"]
   ecs_properties = jsonencode({
-    platformVersion = "LATEST"
     runtimePlatform = {
       cpuArchitecture       = "X86_64" # TODO: support ARM64 when the mutants image supports it
       operatingSystemFamily = "LINUX"
     }
     taskProperties = [
       {
-        executionRoleArn = "arn:aws:iam::${local.account_id}:role/mutants-batch-execution"
-        taskRoleArn      = "arn:aws:iam::${local.account_id}:role/mutants-batch-execution" # TODO: Should they be different?
+        platformVersion  = "LATEST",
+        executionRoleArn = "arn:aws:iam::${local.account_id}:role/${var.execution_role_name}"
+        taskRoleArn      = "arn:aws:iam::${local.account_id}:role/${var.task_role_name}"
         networkConfiguration = {
-          assignPublicIp = "ENABLED"
+          assignPublicIp = "ENABLED" # needed to reach the internet and the containers
         }
         containers = [
           {
@@ -45,9 +45,76 @@ resource "aws_batch_job_definition" "mutants-amd64" {
             dependsOn   = []
             environment = []
             mountPoints = []
-          }
+            secrets     = []
+          },
         ]
+        volumes = []
       }
     ]
   })
+}
+
+resource "aws_iam_role" "execution" {
+  name        = var.execution_role_name
+  description = "Execution role for mutants-remote ECS tasks, allowing them to fetch container images and write logs"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "execution" {
+  role_name   = aws_iam_role.execution.name
+  policy_arns = ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]
+}
+
+resource "aws_iam_role" "task" {
+  name        = var.task_role_name
+  description = "Task role for mutants-remote ECS tasks, allowing them to fetch container images and write logs"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "task" {
+  name        = var.task_role_name
+  description = "Task role for mutants-remote ECS tasks, allowing them to read input and output objects from S3"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachments_exclusive" "task" {
+  role_name = aws_iam_role.task.name
+  policy_arns = [
+    aws_iam_policy.task.arn,
+  ]
 }

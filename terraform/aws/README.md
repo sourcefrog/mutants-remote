@@ -24,15 +24,16 @@ terraform apply -var="memory=8192"
 
 Three different IAM principals are used in mutants-remote:
 
-- Your admin user or role: used only to create the Terraform infrastructure.
+- Your admin user or role: used only to create the Terraform infrastructure. This principal should not be accessible at runtime.
 - `mutants-batch-submission`: Your client machine uses this role to submit batch jobs: it has permission to write files to S3, create batch jobs, read logs, etc.
-- batch execution role: This role is used by batch jobs to access the infrastructure.
-- batch instance role: This role is accessible to the batch jobs, and is used to read and write S3 files.
+- `mutants-batch-execution`: This role is assumed by the AWS Batch infrastructure and used to launch containers. It has permission to read containers and to rite logs.
+- `mutants-batch-task`: This role is accessible to the batch jobs, and is used to read and write S3 files.
 
 ## TODO
 
 The following resources are not yet automated:
 
+- Create submission role
 - IAM roles, groups, and policies
 - Compute environment
 - Batch queue
