@@ -50,6 +50,12 @@ resource "aws_batch_job_definition" "mutants" {
             environment = []
             mountPoints = []
             secrets     = []
+            logConfiguration = {
+              logDriver = "awslogs"
+              options = {
+                "awslogs-group" = aws_cloudwatch_log_group.logs.name
+              }
+            }
           },
         ]
         volumes = []
@@ -84,8 +90,27 @@ resource "aws_vpc" "tasks" {
 }
 
 resource "aws_subnet" "tasks" {
-  cidr_block = "10.0.0.0/16"
-  vpc_id     = aws_vpc.tasks.id
+  cidr_block              = "10.0.0.0/16"
+  vpc_id                  = aws_vpc.tasks.id
+  map_public_ip_on_launch = true
+}
+
+resource "aws_internet_gateway" "egress" {
+  vpc_id = aws_vpc.tasks.id
+}
+
+resource "aws_route_table" "egress" {
+  vpc_id = aws_vpc.tasks.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.egress.id
+  }
+}
+
+resource "aws_route_table_association" "egress" {
+  subnet_id      = aws_subnet.tasks.id
+  route_table_id = aws_route_table.egress.id
 }
 
 resource "aws_security_group" "tasks-egress" {
@@ -195,4 +220,9 @@ resource "aws_s3_bucket_public_access_block" "tmp" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_cloudwatch_log_group" "logs" {
+  name              = var.log_group_name
+  retention_in_days = var.log_retention_days
 }

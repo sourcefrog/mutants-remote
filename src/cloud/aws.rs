@@ -87,7 +87,7 @@ impl AwsCloud {
         let log_group_name = config
             .aws_log_group_name
             .clone()
-            .unwrap_or("/aws/batch/job".to_string());
+            .unwrap_or("mutants-remote".to_string());
 
         let account_id = match sts_client
             .get_caller_identity()

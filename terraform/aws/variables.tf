@@ -27,3 +27,15 @@ variable "max_vcpus" {
   description = "The maximum number of vCPUs that can be simultaneously used by the batch worker instances."
   default     = 1024
 }
+
+variable "log_retention_days" {
+  type        = number
+  description = "The number of days to retain logs for the batch worker instances. Possible values are: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653, and 0. If you select 0, the events in the log group are always retained and never expire."
+  default     = 90
+}
+
+variable "log_group_name" {
+  type        = string
+  description = "The name of the log group for the batch worker instances."
+  default     = "mutants-remote"
+}

@@ -2,5 +2,5 @@ aws_s3_bucket = "mutants-remote-tmp-123456789" # "mutants-tmp-0733-uswest2"
 aws_batch_job_queue = "mutants"                # default is "mutants"
 vcpus = 4                                      # default is set in Terraform
 memory = 16384                                 # default is set in Terraform
-aws_batch_job_definition = "mutants-amd64"     # default is "mutants-amd64"
-aws_log_group_name = "/aws/batch/job"
+aws_batch_job_definition = "mutants-amd64"     # default is "mutants-amd64", or use "mutants-arm64"
+aws_log_group_name = "mutants-remote"          # default is "mutants-remote"
