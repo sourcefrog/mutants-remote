@@ -7,11 +7,13 @@ An experimental tool to launch [cargo-mutants](https://github.com/sourcefrog/car
 
 ## Setup
 
-Before running the tool you must manually create an AWS account with a bucket, batch queue, compute environment, and roles.
+Before running the tool you must manually create an AWS account with a bucket, batch queue, compute environment, and roles. This is partially automated by the Terraform module in `terraform/aws`.
 
 ### AWS Credentials
 
-AWS credentials are fetched from the [standard AWS credential provider chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html). Most likely, you will want to provide a credentials in the environment (`$AWS_SECRET_ACCESS_KEY` etc) or by pointing to a configured profile by setting `$AWS_PROFILE`.
+AWS credentials are fetched from the [standard AWS credential provider chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html).
+
+Most likely, you will want to configure an `awscli` profile and point to it by setting `$AWS_PROFILE`, or provide a credentials in the environment (`$AWS_SECRET_ACCESS_KEY` etc).
 
 ## Security
 
@@ -21,6 +23,6 @@ Assume that any write access to the account allows arbitrary code execution with
 
 The AWS account used should contain no other resources and be accessible to only a single user.
 
-As always, be careful not to commit or otherwise leak any credentials. Consider using something like `aws-vault` to keep local credentials safe.
+As always, be careful not to commit any credentials into git, or leak them in other ways. Consider using time-limited session credentials, e.g. through `aws configure sso`.
 
 This tool has not had second-party security review and may have security related bugs.
