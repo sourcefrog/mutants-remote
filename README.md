@@ -35,7 +35,7 @@ The given source directory is packaged into a tarball and uploaded to S3. By def
 
 mutants-remote reads a configuration file from `~/.config/mutants-remote.toml` or the path given by `--config`.
 
-See `examples/config.toml` for an example configuration.
+See `examples/config.toml` for an example configuration. A JSON schema can be printed with `mutants-remote config-schema`.
 
 ## Examples
 
