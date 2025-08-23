@@ -27,9 +27,15 @@ As always, be careful not to commit any credentials into git, or leak them in ot
 
 This tool has not had second-party security review and may have security related bugs.
 
-## Overview
+## Usage
 
 The given source directory is packaged into a tarball and uploaded to S3. By default, everything in the directory is included, but you can exclude files and directories using the `-e` flag. Probably you will want to exclude `target`, `mutants.out*` and `.git`.
+
+### Configuration
+
+mutants-remote reads a configuration file from `~/.config/mutants-remote.toml` or the path given by `--config`.
+
+See `examples/config.toml` for an example configuration.
 
 ## Examples
 
