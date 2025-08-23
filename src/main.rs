@@ -36,7 +36,7 @@ use crate::cloud::{Cloud, CloudJobId, open_cloud};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::JobStatus;
-use crate::run::{KillTarget, RunId, RunMetadata};
+use crate::run::{KillTarget, RunArgs, RunId, RunMetadata};
 
 static VERSION: &str = env!("CARGO_PKG_VERSION");
 static TOOL_NAME: &str = "mutants-remote";
@@ -69,6 +69,10 @@ enum Commands {
         /// Total number of shards
         #[arg(long, default_value = "1")]
         shards: u32,
+
+        /// Pass remaining arguments to remote cargo-mutants
+        #[arg(last = true)]
+        cargo_mutants_args: Vec<String>,
     },
 
     /// Print the JSON schema for the configuration file.
@@ -126,9 +130,16 @@ async fn inner_main() -> Result<()> {
     let cloud = open_cloud(&config).await?;
 
     match &cli.command {
-        Commands::Run { shards, source } => {
+        Commands::Run {
+            shards,
+            source,
+            cargo_mutants_args,
+        } => {
             assert_eq!(*shards, 1, "Multiple shards are not supported yet");
             let run_metadata = RunMetadata::new(source);
+            let run_args = RunArgs {
+                cargo_mutants_args: cargo_mutants_args.clone(),
+            };
             let source_tarball_path = tar_source(source, &tempdir).await?;
             cloud
                 .upload_source_tarball(&run_id, &source_tarball_path)
@@ -139,7 +150,7 @@ async fn inner_main() -> Result<()> {
 
             info!("Submitting job");
             let (job_name, cloud_job_id) = cloud
-                .submit(&run_id, &run_metadata)
+                .submit(&run_id, &run_metadata, &run_args)
                 .await
                 .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 

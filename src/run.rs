@@ -16,6 +16,12 @@ use crate::{
     },
 };
 
+/// Additional arguments for the run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunArgs {
+    pub cargo_mutants_args: Vec<String>,
+}
+
 /// Additional metadata attached to all the resources in one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunMetadata {

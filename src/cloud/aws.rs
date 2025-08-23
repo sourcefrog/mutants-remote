@@ -22,19 +22,23 @@ use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
 use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
+use shell_quote::QuoteRefExt;
 use time::OffsetDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::tags::{
-    CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
-    SOURCE_DIR_TAIL_TAG,
-};
 use crate::{Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME};
 use crate::{
     config::Config,
     job::{JobDescription, JobName, JobStatus},
     run::{KillTarget, RunId, RunMetadata},
+};
+use crate::{
+    run::RunArgs,
+    tags::{
+        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
+        SOURCE_DIR_TAIL_TAG,
+    },
 };
 
 pub struct AwsCloud {
@@ -215,6 +219,7 @@ impl Cloud for AwsCloud {
         &self,
         run_id: &RunId,
         run_metadata: &RunMetadata,
+        run_args: &RunArgs,
     ) -> Result<(JobName, CloudJobId)> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
@@ -228,7 +233,16 @@ impl Cloud for AwsCloud {
         };
         let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
-        let script = format!("cargo mutants --in-place --shard {shard_k}/{shard_n} -vV || true");
+        let script = format!(
+            "cargo mutants {cargo_mutants_args} --shard {shard_k}/{shard_n} -vV || true",
+            cargo_mutants_args = run_args
+                .cargo_mutants_args
+                .iter()
+                .map(|a| a.quoted(shell_quote::Bash))
+                .collect::<Vec<String>>()
+                .join(" ")
+        );
+        debug!(?script);
         let wrapped_script = format!(
             "
             free -m && id && pwd && df -m &&
@@ -245,6 +259,7 @@ impl Cloud for AwsCloud {
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
         );
+        debug!(?wrapped_script);
         self.put_object(
             &script_key,
             ByteStream::from(Bytes::from(wrapped_script)),

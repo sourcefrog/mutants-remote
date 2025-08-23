@@ -26,3 +26,9 @@ The AWS account used should contain no other resources and be accessible to only
 As always, be careful not to commit any credentials into git, or leak them in other ways. Consider using time-limited session credentials, e.g. through `aws configure sso`.
 
 This tool has not had second-party security review and may have security related bugs.
+
+## Examples
+
+You can pass arguments to the remote `cargo-mutants` after `--`, for example:
+
+   cargo mutants --no-default-features -f archive.rs -d ~/src/conserve --cargo-arg=--config='linker="clang"' --cargo-arg=--config=rustflags='["-C", "link-arg=--ld-path=wild"]'
