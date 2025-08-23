@@ -41,6 +41,4 @@ Three different IAM principals are used in mutants-remote:
 
 The following resources are not yet automated:
 
-- Submission role: it's a bit unclear how to vend access to the submission role
-- Compute environment
-- Batch queue
+- Submission role: I'm not sure how to vend access to the submission role; users might want SSO, local creds, etc.
