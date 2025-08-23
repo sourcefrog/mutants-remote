@@ -145,8 +145,9 @@ async fn inner_main() -> Result<()> {
             let run_args = RunArgs {
                 cargo_mutants_args: cargo_mutants_args.clone(),
             };
-            // TODO: Join patterns from config
-            let source_tarball_path = tar_source(source, &tempdir, copy_exclude).await?;
+            let mut exclude_patterns = copy_exclude.clone();
+            exclude_patterns.extend_from_slice(&config.copy_exclude);
+            let source_tarball_path = tar_source(source, &tempdir, &exclude_patterns).await?;
             cloud
                 .upload_source_tarball(&run_id, &source_tarball_path)
                 .await
@@ -317,6 +318,7 @@ async fn tar_source(
     debug!("Tarring source directory...");
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
     let mut child = Command::new("tar");
+    debug!(?exclude_patterns);
     child
         .arg("--zstd")
         .arg("-cf")

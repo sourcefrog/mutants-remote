@@ -3,6 +3,7 @@
 use std::{
     env::home_dir,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use schemars::JsonSchema;
@@ -33,6 +34,10 @@ pub struct Config {
     pub vcpus: Option<u32>,
     /// Memory in megabytes per job.
     pub memory: Option<u32>,
+
+    /// Exclude files matching these patterns from the source tarball.
+    #[serde(default)]
+    pub copy_exclude: Vec<String>,
 }
 
 impl Config {
@@ -61,13 +66,20 @@ impl Config {
                 config_path.display()
             ))
         })?;
-        let config: Config = toml::from_str(&config_str).map_err(|err| {
-            crate::Error::Config(format!(
-                "Failed to parse config file {path}: {err}",
-                path = config_path.display()
+        config_str.parse().map_err(|err| {
+            Error::Config(format!(
+                "Failed to parse config file {}: {err}",
+                config_path.display()
             ))
-        })?;
-        Ok(config)
+        })
+    }
+}
+
+impl FromStr for Config {
+    type Err = toml::de::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        toml::from_str(s)
     }
 }
 
@@ -95,6 +107,7 @@ mod tests {
     #[test]
     fn config_from_file() {
         let mut config_tmp = NamedTempFile::new().unwrap();
+        // No copy_exclude here: check that the default is empty.
         config_tmp
             .write_all(
                 br#"
@@ -114,6 +127,17 @@ mod tests {
             Some("my-definition".to_string())
         );
         assert_eq!(config.aws_log_group_name, Some("my-log-group".to_string()));
+        assert_eq!(config.copy_exclude, Vec::<String>::new());
+    }
+
+    #[test]
+    fn config_copy_exclude() {
+        let config = r#"
+        copy_exclude = ["mutants.out*", ".git"]
+        "#;
+
+        let config = Config::from_str(config).unwrap();
+        assert_eq!(config.copy_exclude, ["mutants.out*", ".git"]);
     }
 
     #[test]
@@ -124,7 +148,7 @@ mod tests {
         assert_matches!(err, Error::Config(_));
         let msg = err.to_string();
         println!("{}", msg);
-        assert!(msg.starts_with("Invalid configuration: Failed to parse config file"));
+        assert!(msg.starts_with("Invalid configuration: "));
         assert!(msg.contains("garbage"));
         assert!(msg.contains(config_tmp.path().display().to_string().as_str()));
     }
