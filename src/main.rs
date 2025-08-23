@@ -70,6 +70,10 @@ enum Commands {
         #[arg(long, default_value = "1")]
         shards: u32,
 
+        /// Exclude files and directories matching this pattern from the source directory
+        #[arg(long, short = 'e')]
+        copy_exclude: Vec<String>,
+
         /// Pass remaining arguments to remote cargo-mutants
         #[arg(last = true)]
         cargo_mutants_args: Vec<String>,
@@ -131,16 +135,18 @@ async fn inner_main() -> Result<()> {
 
     match &cli.command {
         Commands::Run {
+            cargo_mutants_args,
+            copy_exclude,
             shards,
             source,
-            cargo_mutants_args,
         } => {
             assert_eq!(*shards, 1, "Multiple shards are not supported yet");
             let run_metadata = RunMetadata::new(source);
             let run_args = RunArgs {
                 cargo_mutants_args: cargo_mutants_args.clone(),
             };
-            let source_tarball_path = tar_source(source, &tempdir).await?;
+            // TODO: Join patterns from config
+            let source_tarball_path = tar_source(source, &tempdir, copy_exclude).await?;
             cloud
                 .upload_source_tarball(&run_id, &source_tarball_path)
                 .await
@@ -300,29 +306,40 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<(JobStatu
 }
 
 /// Tar up the source directory and return the temporary path to the tarball.
-async fn tar_source(source: &Path, temp_dir: &Path) -> Result<PathBuf> {
+async fn tar_source(
+    source: &Path,
+    temp_dir: &Path,
+    exclude_patterns: &[String],
+) -> Result<PathBuf> {
     // TODO: Maybe do this in memory to avoid dependencies on the system tar, so that
     // we can exclude /target without false positives and without failing on non-GNU
     // tars? But, we still need to use the system tar in the workers...
     debug!("Tarring source directory...");
     let tarball_path = temp_dir.join(SOURCE_TARBALL_NAME);
-    let mut child = Command::new("tar")
+    let mut child = Command::new("tar");
+    child
         .arg("--zstd")
         .arg("-cf")
         .arg(&tarball_path)
         .arg("-C")
-        .arg(source)
-        .arg("--exclude-caches") // should get /target without false positives?
-        // .arg("--exclude")
-        // .arg("target")
-        .arg(".")
+        .arg(source);
+    for pat in exclude_patterns {
+        child.arg("--exclude").arg(pat);
+    }
+    child.arg(".");
+    let exit_status = child
         .spawn()
+        .map_err(Error::Io)?
+        .wait()
+        .await
         .map_err(Error::Io)?;
-    let exit_status = child.wait().await.map_err(Error::Io)?;
     if !exit_status.success() {
         return Err(Error::Tar(format!("tar failed: {exit_status}")));
     }
-    debug!("Source tarball size: {}", tarball_path.metadata()?.len());
+    info!(
+        "Source tarball size: {}kiB",
+        tarball_path.metadata()?.len() / 1024
+    );
     Ok(tarball_path)
 }
 
