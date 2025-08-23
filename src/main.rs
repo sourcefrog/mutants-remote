@@ -71,10 +71,14 @@ enum Commands {
         shards: u32,
 
         /// Exclude files and directories matching this pattern from the source directory
+        ///
+        /// This list is combined with the `copy_exclude` list from the configuration file.
         #[arg(long, short = 'e')]
         copy_exclude: Vec<String>,
 
         /// Pass remaining arguments to remote cargo-mutants
+        ///
+        /// This list is combined with the `cargo_mutants_args` list from the configuration file.
         #[arg(last = true)]
         cargo_mutants_args: Vec<String>,
     },
