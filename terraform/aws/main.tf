@@ -75,7 +75,6 @@ resource "aws_batch_job_queue" "queue" {
 }
 
 resource "aws_batch_compute_environment" "compute" {
-  name = "mutants"
   type = "MANAGED"
   compute_resources {
     max_vcpus          = var.max_vcpus
