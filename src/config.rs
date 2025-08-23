@@ -38,6 +38,10 @@ pub struct Config {
     /// Exclude files matching these patterns from the source tarball.
     #[serde(default)]
     pub copy_exclude: Vec<String>,
+
+    /// Additional args passed to remote cargo-mutants.
+    #[serde(default)]
+    pub cargo_mutants_args: Vec<String>,
 }
 
 impl Config {
@@ -115,6 +119,7 @@ mod tests {
                 aws_batch_job_queue = "my-queue"
                 aws_batch_job_definition = "my-definition"
                 aws_log_group_name = "my-log-group"
+                cargo_mutants_args = ['--cargo-arg=--config=linker="clang"', '--cargo-arg=--config=rustflags=["-C", "link-arg=--ld-path=wild"]']
                 "#,
             )
             .unwrap();
@@ -128,6 +133,13 @@ mod tests {
         );
         assert_eq!(config.aws_log_group_name, Some("my-log-group".to_string()));
         assert_eq!(config.copy_exclude, Vec::<String>::new());
+        assert_eq!(
+            config.cargo_mutants_args,
+            [
+                r#"--cargo-arg=--config=linker="clang""#,
+                r#"--cargo-arg=--config=rustflags=["-C", "link-arg=--ld-path=wild"]"#
+            ]
+        );
     }
 
     #[test]

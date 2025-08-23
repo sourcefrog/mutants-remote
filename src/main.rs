@@ -143,8 +143,13 @@ async fn inner_main() -> Result<()> {
             assert_eq!(*shards, 1, "Multiple shards are not supported yet");
             let run_metadata = RunMetadata::new(source);
             let run_args = RunArgs {
-                cargo_mutants_args: cargo_mutants_args.clone(),
+                cargo_mutants_args: cargo_mutants_args
+                    .clone()
+                    .into_iter()
+                    .chain(config.cargo_mutants_args.iter().cloned())
+                    .collect(),
             };
+            debug!(?run_args);
             let mut exclude_patterns = copy_exclude.clone();
             exclude_patterns.extend_from_slice(&config.copy_exclude);
             let source_tarball_path = tar_source(source, &tempdir, &exclude_patterns).await?;
