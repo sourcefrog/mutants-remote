@@ -21,6 +21,11 @@ use crate::{
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 
+/// The prefix of the default bucket name created by Terraform.
+///
+/// The name is not fixed because bucket names must be unique across all AWS accounts, and so it contains a random suffix.
+static DEFAULT_BUCKET_PREFIX: &str = "mutants-remote-tmp-";
+
 pub mod aws;
 
 /// Abstraction of a cloud provider that can launch jobs, read their status,
