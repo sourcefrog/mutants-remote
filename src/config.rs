@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::debug;
 
+use crate::cloud::CloudProvider;
 use crate::{Error, Result};
 
 /// Default configuration file name, relative to home.
@@ -21,6 +22,9 @@ static DEFAULT_CONFIG_FILE: &str = ".config/mutants-remote.toml";
 /// `--config`.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Config {
+    /// Which cloud provider to use.
+    pub cloud_provider: Option<CloudProvider>,
+
     /// The name of the bucket to store artifacts, including input source tarballs and results.
     pub aws_s3_bucket: Option<String>,
     /// The name of the AWS Batch job queue to use.
@@ -140,6 +144,17 @@ mod tests {
                 r#"--cargo-arg=--config=rustflags=["-C", "link-arg=--ld-path=wild"]"#
             ]
         );
+        assert_eq!(config.cloud_provider, None);
+    }
+
+    #[test]
+    fn cloud_aws_batch() {
+        let config = r#"
+        cloud_provider = "AwsBatch"
+        "#;
+
+        let config = Config::from_str(config).unwrap();
+        assert_eq!(config.cloud_provider, Some(CloudProvider::AwsBatch));
     }
 
     #[test]

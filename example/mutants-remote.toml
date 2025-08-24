@@ -1,3 +1,4 @@
+cloud_provider = "AwsBatch"
 aws_s3_bucket = "mutants-remote-tmp-123456789" # By default, finds the bucket created by the Terraform script
 aws_batch_job_queue = "mutants" # default is "mutants"
 vcpus = 4 # default is set in Terraform

@@ -8,15 +8,19 @@ use std::{
 };
 
 use async_trait::async_trait;
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::error;
 
-use crate::run::{KillTarget, RunId, RunMetadata};
-use crate::{Result, cloud::aws::AwsCloud, config::Config};
 use crate::{
+    cloud::aws::AwsCloud,
+    config::Config,
+    error::Result,
     job::{JobDescription, JobName},
     run::RunArgs,
+    // cloud::docker::Docker,
+    run::{KillTarget, RunId, RunMetadata},
 };
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -27,6 +31,7 @@ static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 static DEFAULT_BUCKET_PREFIX: &str = "mutants-remote-tmp-";
 
 pub mod aws;
+// pub mod docker;
 
 /// Abstraction of a cloud provider that can launch jobs, read their status,
 /// fetch their logs or output tarball, etc.
@@ -51,17 +56,20 @@ pub trait Cloud {
     async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>>;
 
     /// Kill all jobs associated with a run.
-    async fn kill(&self, run_filter: KillTarget) -> Result<()>;
+    async fn kill(&self, kill_target: KillTarget) -> Result<()>;
 }
 
 /// Create a new cloud provider instance from the configuration.
 pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
-    match AwsCloud::new(config.clone()).await {
-        Ok(cloud) => Ok(Box::new(cloud)),
-        Err(err) => {
-            error!("Failed to initialize AWS cloud: {err}");
-            Err(err)
-        }
+    match config.cloud_provider.unwrap_or(CloudProvider::AwsBatch) {
+        CloudProvider::AwsBatch => match AwsCloud::new(config.clone()).await {
+            Ok(cloud) => Ok(Box::new(cloud)),
+            Err(err) => {
+                error!("Failed to initialize AWS cloud: {err}");
+                Err(err)
+            }
+        },
+        // CloudProvider::Docker => Ok(Box::new(Docker::new(config.clone()))),
     }
 }
 
@@ -84,4 +92,12 @@ pub trait LogTail {
     ///
     /// Returns `Ok(None)` when the log stream has ended.
     async fn more_log_events(&mut self) -> Result<Option<Vec<String>>>;
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, JsonSchema)]
+pub enum CloudProvider {
+    /// Run on AWS Batch
+    AwsBatch,
+    // /// Run in Docker
+    // Docker,
 }
