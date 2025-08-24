@@ -17,6 +17,15 @@ pub enum Error {
     #[error("Cloud provider error: {0}")]
     Cloud(#[source] Box<dyn std::error::Error + Send + Sync>),
 
+    #[error("Data format error: {0}")]
+    Format(&'static str),
+
+    #[error("JSON parsing error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("Docker command failed with exit code {0}")]
+    Docker(i32),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

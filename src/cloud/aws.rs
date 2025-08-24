@@ -22,12 +22,14 @@ use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
 use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
-use shell_quote::QuoteRefExt;
 use time::OffsetDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
-use crate::{Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME, cloud::DEFAULT_BUCKET_PREFIX};
+use crate::{
+    Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME, cloud::DEFAULT_BUCKET_PREFIX,
+    job::central_command,
+};
 use crate::{
     config::Config,
     job::{JobDescription, JobName, JobStatus},
@@ -41,6 +43,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub struct AwsCloud {
     account_id: String,
     sdk_config: aws_config::SdkConfig,
@@ -244,16 +247,7 @@ impl Cloud for AwsCloud {
         let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
         let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
-        let script = format!(
-            "cargo mutants {cargo_mutants_args} --shard {shard_k}/{shard_n} -vV || true",
-            cargo_mutants_args = run_args
-                .cargo_mutants_args
-                .iter()
-                .map(|a| a.quoted(shell_quote::Bash))
-                .collect::<Vec<String>>()
-                .join(" ")
-        );
-        debug!(?script);
+        let script = central_command(run_args, shard_k, shard_n);
         let wrapped_script = format!(
             "
             free -m && id && pwd && df -m &&

@@ -3,7 +3,7 @@
 //! Provides an aspirationally generic interface for cloud providers: the core features are to get and put files, launch jobs, and monitor the status of jobs.
 
 use std::{
-    fmt::{Display, Formatter},
+    fmt::{Debug, Display, Formatter},
     path::{Path, PathBuf},
 };
 
@@ -11,15 +11,14 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tracing::error;
 
 use crate::{
     cloud::aws::AwsCloud,
+    cloud::docker::Docker,
     config::Config,
     error::Result,
     job::{JobDescription, JobName},
     run::RunArgs,
-    // cloud::docker::Docker,
     run::{KillTarget, RunId, RunMetadata},
 };
 
@@ -30,13 +29,16 @@ static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
 /// The name is not fixed because bucket names must be unique across all AWS accounts, and so it contains a random suffix.
 static DEFAULT_BUCKET_PREFIX: &str = "mutants-remote-tmp-";
 
+/// Name of the unix user to run jobs within the container.
+const CONTAINER_USER: &str = "mutants";
+
 pub mod aws;
-// pub mod docker;
+pub mod docker;
 
 /// Abstraction of a cloud provider that can launch jobs, read their status,
 /// fetch their logs or output tarball, etc.
 #[async_trait]
-pub trait Cloud {
+pub trait Cloud: Debug {
     /// Submit a job to the cloud provider.
     ///
     /// The job should start running shortly after this function returns.
@@ -48,7 +50,8 @@ pub trait Cloud {
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)>; // TODO: Should return a vec of all the jobs, or a struct
 
-    async fn fetch_output(&self, job_name: &JobName, dest: &Path) -> Result<PathBuf>;
+    /// Fetch the output tarball of a job into a local destination directory.
+    async fn fetch_output(&self, job_name: &JobName, dest_dir: &Path) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
 
@@ -62,14 +65,8 @@ pub trait Cloud {
 /// Create a new cloud provider instance from the configuration.
 pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
     match config.cloud_provider.unwrap_or(CloudProvider::AwsBatch) {
-        CloudProvider::AwsBatch => match AwsCloud::new(config.clone()).await {
-            Ok(cloud) => Ok(Box::new(cloud)),
-            Err(err) => {
-                error!("Failed to initialize AWS cloud: {err}");
-                Err(err)
-            }
-        },
-        // CloudProvider::Docker => Ok(Box::new(Docker::new(config.clone()))),
+        CloudProvider::AwsBatch => Ok(Box::new(AwsCloud::new(config.clone()).await?)),
+        CloudProvider::Docker => Ok(Box::new(Docker::new(config.clone())?)),
     }
 }
 
@@ -78,6 +75,12 @@ pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
 /// By contrast [`crate::JobName`] is the name chosen by us, before submitting the job.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct CloudJobId(String);
+
+impl CloudJobId {
+    pub fn new(id: &str) -> Self {
+        CloudJobId(id.to_owned())
+    }
+}
 
 impl Display for CloudJobId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -98,6 +101,6 @@ pub trait LogTail {
 pub enum CloudProvider {
     /// Run on AWS Batch
     AwsBatch,
-    // /// Run in Docker
-    // Docker,
+    /// Run in Docker
+    Docker,
 }

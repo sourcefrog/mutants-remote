@@ -136,6 +136,7 @@ async fn inner_main() -> Result<()> {
     let config = Config::new(&cli.config)?;
     debug!(?config);
     let cloud = open_cloud(&config).await?;
+    debug!(?cloud);
 
     match &cli.command {
         Commands::Run {
@@ -186,7 +187,7 @@ async fn inner_main() -> Result<()> {
                     }
                 }
             } else {
-                info!("Job did not start running.");
+                info!("Job did not start running?");
                 return Err(Error::JobDidNotStart);
             }
         }
@@ -275,15 +276,20 @@ async fn monitor_job(cloud: &dyn Cloud, job_id: &CloudJobId) -> Result<(JobStatu
             last_status = Some(job_description.status);
         }
         match job_description.status {
+            JobStatus::Running | JobStatus::Completed => {
+                started_running = true;
+            }
+            _ => {}
+        }
+        match job_description.status {
             JobStatus::Completed | JobStatus::Failed => {
                 // TODO: Maybe wait just a little longer for the last logs? But, we don't seem to reliably detect the end of the logs.
                 return Ok((job_description.status, started_running));
             }
-            JobStatus::Running => {
-                started_running = true;
-                if log_tail.is_none() && job_description.log_stream_name.is_some() {
-                    log_tail = Some(cloud.tail_log(&job_description).await?);
-                }
+            JobStatus::Running
+                if log_tail.is_none() && job_description.log_stream_name.is_some() =>
+            {
+                log_tail = Some(cloud.tail_log(&job_description).await?);
             }
             _ => {}
         }
@@ -360,8 +366,8 @@ fn setup_tracing(temp_path: &Path) {
     let log_file = File::create(&log_path).unwrap();
     let file_layer = fmt::Layer::new()
         .with_ansi(false)
-        // .with_file(true)
-        // .with_line_number(true)
+        .with_file(true)
+        .with_line_number(true)
         .with_target(true)
         .with_level(true)
         .with_writer(log_file)

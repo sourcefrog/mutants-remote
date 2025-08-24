@@ -5,10 +5,15 @@
 use std::{collections::HashMap, str::FromStr};
 
 use serde::Serialize;
+use shell_quote::QuoteRefExt;
 use time::OffsetDateTime;
+use tracing::debug;
 
 use super::RunId;
-use crate::{cloud::CloudJobId, run::RunMetadata};
+use crate::{
+    cloud::CloudJobId,
+    run::{RunArgs, RunMetadata},
+};
 
 /// Name assigned by us to a job within a run, including the run id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
@@ -16,6 +21,15 @@ pub struct JobName {
     pub run_id: RunId,
     // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
     pub shard_k: u32,
+}
+
+impl JobName {
+    pub fn new(run_id: &RunId, shard_k: u32) -> Self {
+        JobName {
+            run_id: run_id.clone(),
+            shard_k,
+        }
+    }
 }
 
 impl std::fmt::Display for JobName {
@@ -120,6 +134,24 @@ impl JobStatus {
     pub fn is_alive(&self) -> bool {
         *self != JobStatus::Unknown && !self.is_dead()
     }
+}
+
+/// Return the main command to be run.
+///
+/// This can be wrapped in cloud-specific commands.
+pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: u32) -> String {
+    // TODO: Maybe Vec<String> instead?
+    let script = format!(
+        "cargo mutants {cargo_mutants_args} --shard {shard_k}/{shard_n} -vV || true",
+        cargo_mutants_args = run_args
+            .cargo_mutants_args
+            .iter()
+            .map(|a| a.quoted(shell_quote::Bash))
+            .collect::<Vec<String>>()
+            .join(" ")
+    );
+    debug!(?script);
+    script
 }
 
 #[cfg(test)]

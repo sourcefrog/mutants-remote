@@ -16,6 +16,8 @@ use crate::{Error, Result};
 /// Default configuration file name, relative to home.
 static DEFAULT_CONFIG_FILE: &str = ".config/mutants-remote.toml";
 
+static DEFAULT_IMAGE_NAME: &str = "ghcr.io/sourcefrog/cargo-mutants:container";
+
 /// Configuration for mutants-remote.
 ///
 /// This is by default read from `~/.config/mutants-remote.toml`, or from the file specified by
@@ -24,6 +26,9 @@ static DEFAULT_CONFIG_FILE: &str = ".config/mutants-remote.toml";
 pub struct Config {
     /// Which cloud provider to use.
     pub cloud_provider: Option<CloudProvider>,
+
+    /// The Docker image to use for the remote environment.
+    pub image_name: Option<String>,
 
     /// The name of the bucket to store artifacts, including input source tarballs and results.
     pub aws_s3_bucket: Option<String>,
@@ -80,6 +85,11 @@ impl Config {
                 config_path.display()
             ))
         })
+    }
+
+    /// Return the image name or the builtin default.
+    pub fn image_name_or_default(&self) -> &str {
+        self.image_name.as_deref().unwrap_or(DEFAULT_IMAGE_NAME)
     }
 }
 
@@ -148,13 +158,33 @@ mod tests {
     }
 
     #[test]
-    fn cloud_aws_batch() {
+    fn cloud_provider_aws_batch() {
         let config = r#"
         cloud_provider = "AwsBatch"
         "#;
 
         let config = Config::from_str(config).unwrap();
         assert_eq!(config.cloud_provider, Some(CloudProvider::AwsBatch));
+    }
+
+    #[test]
+    fn cloud_provider_docker() {
+        let config = r#"
+        cloud_provider = "Docker"
+        "#;
+
+        let config = Config::from_str(config).unwrap();
+        assert_eq!(config.cloud_provider, Some(CloudProvider::Docker));
+    }
+
+    #[test]
+    fn cloud_provider_unknown() {
+        let config = r#"
+        cloud_provider = "Unknown"
+        "#;
+        let err = Config::from_str(config).unwrap_err();
+        println!("{err}");
+        assert!(err.to_string().contains("unknown variant `Unknown`"));
     }
 
     #[test]
@@ -167,6 +197,31 @@ mod tests {
         assert_eq!(config.copy_exclude, ["mutants.out*", ".git"]);
     }
 
+    #[test]
+    fn config_image_name() {
+        let config = r#"
+        image_name = "ghcr.io/sourcefrog/cargo-mutants:something"
+        "#;
+
+        let config = Config::from_str(config).unwrap();
+        assert_eq!(
+            config.image_name.unwrap(),
+            "ghcr.io/sourcefrog/cargo-mutants:something"
+        );
+    }
+
+    #[test]
+    fn default_image_name() {
+        let config = r#"
+        "#;
+
+        let config = Config::from_str(config).unwrap();
+        assert_eq!(config.image_name, None);
+        assert_eq!(
+            config.image_name_or_default(),
+            "ghcr.io/sourcefrog/cargo-mutants:container"
+        );
+    }
     #[test]
     fn config_from_file_with_errors() {
         let mut config_tmp = NamedTempFile::new().unwrap();
