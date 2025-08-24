@@ -246,7 +246,7 @@ async fn inner_main() -> Result<()> {
             let what = if *all {
                 KillTarget::All
             } else {
-                KillTarget::ById(run_id.to_owned())
+                KillTarget::ByRunId(run_id.to_owned())
             };
             cloud.kill(what).await?;
         }

@@ -182,7 +182,27 @@ impl Cloud for Docker {
 
     /// Kill all jobs associated with a run.
     async fn kill(&self, kill_target: KillTarget) -> Result<()> {
-        todo!("Docker::kill")
+        let all_jobs = self.list_jobs(None).await?;
+        let mut command = Command::new("docker");
+        command.arg("kill");
+        all_jobs
+            .iter()
+            .filter(|job| job.status == JobStatus::Running)
+            .filter(|job| match &kill_target {
+                KillTarget::ByRunId(run_ids) => job.run_id().is_some_and(|r| run_ids.contains(r)),
+                KillTarget::All => true,
+            })
+            .for_each(|job| {
+                command.arg(job.cloud_job_id.to_string());
+            });
+        debug!(?command, "Killing jobs");
+        let exit = command.spawn()?.wait().await?;
+        if exit.success() {
+            Ok(())
+        } else {
+            error!("Docker kill failed with exit code {:?}", exit.code());
+            Err(Error::Docker(exit.code().unwrap_or(1)))
+        }
     }
 }
 
@@ -326,6 +346,9 @@ mod tests {
                 ),
             ]
         );
-        // assert_eq!(job0.run_metadata., RunId::new("20250824-172923-7c72"));
+        assert_eq!(
+            job0.job_name.as_ref().unwrap(),
+            &JobName::new(&RunId::from_str("20250824-172923-7c72").unwrap(), 0)
+        );
     }
 }

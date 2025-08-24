@@ -85,6 +85,10 @@ pub struct JobDescription {
 }
 
 impl JobDescription {
+    pub fn run_id(&self) -> Option<&RunId> {
+        self.job_name.as_ref().map(|j| &j.run_id)
+    }
+
     pub fn duration(&self) -> Option<std::time::Duration> {
         // TODO: Maybe for currently running or queued jobs, give the elapsed time since start?
         match (self.started_at, self.stopped_at) {

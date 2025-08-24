@@ -390,7 +390,7 @@ impl Cloud for AwsCloud {
             .filter(|j| j.status.is_alive())
             .filter(|j| match &kill_target {
                 KillTarget::All => true,
-                KillTarget::ById(kill_ids) => j
+                KillTarget::ByRunId(kill_ids) => j
                     .job_name
                     .as_ref()
                     .is_some_and(|n| kill_ids.contains(&n.run_id)),

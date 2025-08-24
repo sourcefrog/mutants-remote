@@ -85,7 +85,7 @@ impl RunMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillTarget {
     All,
-    ById(Vec<RunId>),
+    ByRunId(Vec<RunId>),
 }
 
 /// Identifier assigned by us to a run.
