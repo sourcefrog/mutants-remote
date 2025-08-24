@@ -37,10 +37,7 @@ use crate::{
 };
 use crate::{
     run::RunArgs,
-    tags::{
-        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG,
-        SOURCE_DIR_TAIL_TAG,
-    },
+    tags::{MUTANTS_REMOTE_VERSION_TAG, RUN_ID_TAG},
 };
 
 #[derive(Debug)]
@@ -364,16 +361,11 @@ impl Cloud for AwsCloud {
                 .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
                 .ok()
         });
-        let mut tags = job_detail
+        let tags = job_detail
             .tags
             .as_ref()
             .map_or_else(HashMap::new, HashMap::clone);
-        let run_metadata = Some(RunMetadata {
-            source_dir_tail: tags.remove(SOURCE_DIR_TAIL_TAG),
-            client_hostname: tags.remove(CLIENT_HOSTNAME_TAG),
-            client_username: tags.remove(CLIENT_USERNAME_TAG),
-            mutants_remote_version: tags.remove(MUTANTS_REMOTE_VERSION_TAG),
-        });
+        let run_metadata = Some(RunMetadata::from_tags(&tags));
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),

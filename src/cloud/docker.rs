@@ -105,11 +105,11 @@ impl Cloud for Docker {
         );
         debug!(?wrapped_script);
         std::fs::write(job_dir.join("script.sh"), wrapped_script)?;
+        // TODO: Add a tag for the start time, because Docker doesn't preserve it after the job exits.
         command
             .args(["container", "run"])
             .arg(format!("--name={job_name}"))
             .arg(format!("--user={CONTAINER_USER}"))
-            // TODO: More job metadata into labels
             .arg(format!("--label={RUN_ID_TAG}={run_id}"))
             .arg(format!("--cidfile={}", container_id_path.to_str().unwrap()))
             .arg(format!(
@@ -119,6 +119,9 @@ impl Cloud for Docker {
             .arg(self.config.image_name_or_default())
             .args(["bash", "-ex"])
             .arg(format!("{JOB_MOUNT}/script.sh"));
+        for (key, value) in run_metadata.to_tags() {
+            command.arg(format!("--label={key}={value}"));
+        }
         debug!(?command);
         let mut child = command.spawn().inspect_err(|err| {
             error!("Failed to spawn docker container: {}", err);
@@ -259,6 +262,7 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
                     .flatten()
                     .collect::<HashMap<String, String>>()
             });
+        let run_metadata = cloud_tags.as_ref().map(RunMetadata::from_tags);
         jobs.push(JobDescription {
             cloud_job_id: CloudJobId(container_id.to_owned()),
             status,
@@ -266,14 +270,14 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
                 .get("Status")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            log_stream_name: None,
+            log_stream_name: None, // not relevant, just use the container id
             raw_job_name: Some(name.to_string()),
             job_name: Some(job_name),
             started_at: created_at, // not distinctly reported by Docker and pretty much the same time
             created_at,
             stopped_at: None, // not reported exactly but we could get it from the string in the status
             cloud_tags,
-            run_metadata: None, // TODO: Decode from labels
+            run_metadata,
         })
     }
     Ok(jobs)
@@ -322,5 +326,6 @@ mod tests {
                 ),
             ]
         );
+        // assert_eq!(job0.run_metadata., RunId::new("20250824-172923-7c72"));
     }
 }

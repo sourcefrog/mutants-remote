@@ -4,7 +4,7 @@
 //!
 //! A run is implemented on a cloud as a set of jobs, each of which runs on one VM.
 
-use std::{path::Path, str::FromStr};
+use std::{collections::HashMap, path::Path, str::FromStr};
 
 use serde::Serialize;
 use time::{OffsetDateTime, macros::format_description};
@@ -65,6 +65,19 @@ impl RunMetadata {
             tags.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
         }
         tags
+    }
+
+    pub fn from_tags(tags: &HashMap<String, String>) -> Self {
+        let source_dir_tail = tags.get(SOURCE_DIR_TAIL_TAG).cloned();
+        let client_hostname = tags.get(CLIENT_HOSTNAME_TAG).cloned();
+        let client_username = tags.get(CLIENT_USERNAME_TAG).cloned();
+        let mutants_remote_version = tags.get(MUTANTS_REMOTE_VERSION_TAG).cloned();
+        RunMetadata {
+            source_dir_tail,
+            client_hostname,
+            client_username,
+            mutants_remote_version,
+        }
     }
 }
 
