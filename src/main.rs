@@ -157,16 +157,12 @@ async fn inner_main() -> Result<()> {
             let mut exclude_patterns = copy_exclude.clone();
             exclude_patterns.extend_from_slice(&config.copy_exclude);
             let source_tarball_path = tar_source(source, &tempdir, &exclude_patterns).await?;
-            cloud
-                .upload_source_tarball(&run_id, &source_tarball_path)
-                .await
-                .inspect_err(|err| error!("Failed to upload source tarball: {err}"))?;
 
             // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
             info!("Submitting job");
             let (job_name, cloud_job_id) = cloud
-                .submit(&run_id, &run_metadata, &run_args)
+                .submit(&run_id, &run_metadata, &run_args, &source_tarball_path)
                 .await
                 .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 

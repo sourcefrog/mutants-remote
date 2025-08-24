@@ -32,13 +32,17 @@ pub mod aws;
 /// fetch their logs or output tarball, etc.
 #[async_trait]
 pub trait Cloud {
-    async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()>;
+    /// Submit a job to the cloud provider.
+    ///
+    /// The job should start running shortly after this function returns.
     async fn submit(
         &self,
         run_id: &RunId,
         run_metadata: &RunMetadata,
         run_args: &RunArgs,
+        source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)>; // TODO: Should return a vec of all the jobs, or a struct
+
     async fn fetch_output(&self, job_name: &JobName, dest: &Path) -> Result<PathBuf>;
     async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>>;
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;

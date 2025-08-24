@@ -154,10 +154,6 @@ impl AwsCloud {
         format!("{}/{}", self.run_prefix(run_id), SOURCE_TARBALL_NAME)
     }
 
-    fn source_tarball_s3_url(&self, run_id: &RunId) -> String {
-        self.s3_url(&self.source_tarball_key(run_id))
-    }
-
     /// The S3 key for the output tarball for a job.
     fn output_tarball_key(&self, job_name: &JobName) -> String {
         format!(
@@ -193,6 +189,20 @@ impl AwsCloud {
             .await?;
         Ok(())
     }
+
+    async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<String> {
+        debug!("Uploading source tarball to S3");
+        let source_tarball_body = ByteStream::from_path(source_tarball).await.map_err(|err| {
+            error!(
+                "Failed to read source tarball {}: {err}",
+                source_tarball.display()
+            );
+            Error::Cloud(err.into())
+        })?;
+        let key = &self.source_tarball_key(run_id);
+        self.put_object(key, source_tarball_body, run_id).await?;
+        Ok(self.s3_url(key))
+    }
 }
 
 /// Find the default bucket created by Terraform.
@@ -215,40 +225,23 @@ async fn find_default_bucket(s3_client: &aws_sdk_s3::Client) -> Result<String> {
 
 #[async_trait]
 impl Cloud for AwsCloud {
-    async fn upload_source_tarball(&self, run_id: &RunId, source_tarball: &Path) -> Result<()> {
-        debug!("Uploading source tarball to S3");
-        let source_tarball_body = ByteStream::from_path(source_tarball).await.map_err(|err| {
-            error!(
-                "Failed to read source tarball {}: {err}",
-                source_tarball.display()
-            );
-            Error::Cloud(err.into())
-        })?;
-        self.put_object(
-            &self.source_tarball_key(run_id),
-            source_tarball_body,
-            run_id,
-        )
-        .await?;
-        Ok(())
-    }
-
     async fn submit(
         &self,
         run_id: &RunId,
         run_metadata: &RunMetadata,
         run_args: &RunArgs,
+        source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
         // Because AWS has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
         let script_key = format!("{}/script.sh", self.run_prefix(run_id));
-        let source_tarball_s3_url = self.source_tarball_s3_url(run_id);
         let shard_k = 0;
         let shard_n = 1;
         let job_name = JobName {
             run_id: run_id.clone(),
             shard_k,
         };
+        let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
         let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
         let script = format!(
