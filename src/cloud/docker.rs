@@ -4,13 +4,15 @@
 
 #![allow(unused)] // until implemented
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use aws_sdk_batch::operation::describe_job_definitions;
 use serde_json::Value;
-use time::OffsetDateTime;
+use tempfile::NamedTempFile;
+use time::{OffsetDateTime, macros::format_description};
 use tokio::fs::{create_dir, create_dir_all};
 use tokio::process::Command;
 use tracing::{debug, error, warn};
@@ -21,13 +23,14 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::{JobDescription, JobName, JobStatus, central_command};
 use crate::run::{KillTarget, RunArgs, RunId, RunMetadata};
+use crate::tags::RUN_ID_TAG;
 
 static JOB_MOUNT: &str = "/job";
 
 /// Docker cloud implementation.
 ///
-/// On Docker, the job name is set to the job name using the `--name` argument,
-/// so the CloudJobName is the same as the job name.
+/// On Docker, the job name is set to the job name using the `--name` argument.
+/// The CloudJobName is the container id returned when the container is created.
 #[derive(Debug)]
 pub struct Docker {
     /// Directory holding bind mounts to Docker for logs, output, etc.
@@ -75,6 +78,7 @@ impl Cloud for Docker {
         let job_name = JobName::new(run_id, 0);
         let job_dir = self.job_dir(&job_name);
         create_dir_all(&job_dir).await?;
+        let container_id_path = job_dir.join("container_id");
 
         tokio::fs::copy(source_tarball, job_dir.join(SOURCE_TARBALL_NAME)).await?;
 
@@ -83,7 +87,7 @@ impl Cloud for Docker {
         let shard_n = 1;
         // TODO: Maybe use 'docker cp' to upload source and download results instead of bind mounts; that
         // would be a bit more similar to remote clouds.
-        // TODO: Job metadata into labels
+        // TODO: Run --detach? That would be more like how it is done in remote clouds.
         let script = central_command(run_args, shard_k, shard_n);
         let wrapped_script = format!(
             "
@@ -105,6 +109,9 @@ impl Cloud for Docker {
             .args(["container", "run"])
             .arg(format!("--name={job_name}"))
             .arg(format!("--user={CONTAINER_USER}"))
+            // TODO: More job metadata into labels
+            .arg(format!("--label={RUN_ID_TAG}={run_id}"))
+            .arg(format!("--cidfile={}", container_id_path.to_str().unwrap()))
             .arg(format!(
                 "--mount=type=bind,source={job_dir},target={JOB_MOUNT}",
                 job_dir = job_dir.display()
@@ -124,8 +131,18 @@ impl Cloud for Docker {
             error!("Docker run command failed with exit code {result:?}");
             return Err(Error::JobDidNotStart);
         }
-        debug!(?job_name, "Started Docker container");
-        Ok((job_name.clone(), CloudJobId::new(&job_name.to_string())))
+        let container_id = std::fs::read(&container_id_path)
+            .inspect_err(|err| error!("Failed to read container ID file: {}", err))?;
+        let container_id = String::from_utf8(container_id)
+            .map_err(|err| Error::Format("Container id is not UTF-8"))?
+            .trim()
+            .to_owned();
+        if container_id.is_empty() {
+            error!("Container ID is empty");
+            return Err(Error::JobDidNotStart);
+        }
+        debug!(?job_name, ?container_id, "Started Docker container");
+        Ok((job_name.clone(), CloudJobId::new(&container_id)))
     }
 
     async fn fetch_output(&self, job_name: &JobName, dest_dir: &Path) -> Result<PathBuf> {
@@ -143,78 +160,167 @@ impl Cloud for Docker {
         todo!("Docker::tail_log")
     }
 
-    async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription> {
-        let mut command = Command::new("docker");
-        command
-            .args(["ps", "--format=json", "-a"])
-            .arg(format!("--filter=name={job_id}"));
-        let output = command.output().await.inspect_err(|err| {
-            error!("Failed to execute docker ps command: {}", err);
-        })?;
-        if !output.status.success() {
-            error!(
-                "Docker ps command failed with exit code {:?}",
-                output.status
-            );
-            return Err(Error::Docker(output.status.code().unwrap()));
+    async fn describe_job(&self, cloud_job_id: &CloudJobId) -> Result<JobDescription> {
+        let mut results = container_ls(&format!("id={cloud_job_id}")).await?;
+        if results.len() == 1 {
+            Ok(results.remove(0))
+        } else {
+            Err(Error::Format(
+                "Expected exactly one container to match job ID",
+            ))
         }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        debug!(?stdout, "Docker ps output");
-        let ps: serde_json::Value = serde_json::from_str(&stdout).inspect_err(|err| {
-            error!("Failed to parse docker ps output: {}", err);
-        })?;
-        debug!(?ps, "Parsed docker ps output");
-        parse_docker_ps_output(&ps)
     }
 
     /// List all jobs, including queued, running, and completed.
     async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>> {
-        todo!("Docker::list_jobs")
+        // TODO: Filter by time over the result, since there doesn't seem to be a native Docker filter.
+        container_ls(&format!("label={RUN_ID_TAG}")).await
     }
 
     /// Kill all jobs associated with a run.
     async fn kill(&self, kill_target: KillTarget) -> Result<()> {
-        todo!()
+        todo!("Docker::kill")
     }
 }
 
-fn parse_docker_ps_output(ps: &serde_json::Value) -> Result<JobDescription> {
-    let dict = ps
-        .as_object()
-        .ok_or(Error::Format("Invalid docker ps JSON format"))?;
-    // It could have multiple names but we expect just one?
-    let name = dict
-        .get("Names")
-        .and_then(Value::as_str)
-        .ok_or(Error::Format("Invalid names in docker ps output"))?;
-    let job_name = JobName::from_str(name)
-        .map_err(|err| Error::Format("$Can't parse job name from docker output"))?;
-    let docker_state = dict
-        .get("State")
-        .and_then(Value::as_str)
-        .ok_or(Error::Format("Invalid state in docker ps output"))?;
-    let status = match docker_state {
-        "running" => JobStatus::Running,
-        "exited" => JobStatus::Completed,
-        _ => {
-            warn!("JobStatus::Unknown, docker_state: {}", docker_state);
-            JobStatus::Unknown
+/// List containers with a Docker filter string.
+async fn container_ls(filters: &str) -> Result<Vec<JobDescription>> {
+    let mut command = Command::new("docker");
+    command
+        .args(["ps", "--format=json", "-a"])
+        .arg(format!("--filter={filters}"));
+    debug!(?command, "Run container_ls");
+    let output = command.output().await.inspect_err(|err| {
+        error!("Failed to execute docker ps command: {}", err);
+    })?;
+    if !output.status.success() {
+        error!(
+            "Docker ps command failed with exit code {:?}",
+            output.status
+        );
+        return Err(Error::Docker(output.status.code().unwrap()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    debug!(?stdout, "Docker ps output");
+    parse_docker_ps_output(&stdout)
+}
+
+/// Parse the output of `docker ps` command.
+///
+/// It has one json dict per line, each of which maps to a job description.
+fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>> {
+    let mut jobs = Vec::new();
+    for line in container_ls_json.lines() {
+        if line.trim().is_empty() {
+            continue;
         }
-    };
-    Ok(JobDescription {
-        cloud_job_id: CloudJobId(name.to_string()),
-        status,
-        status_reason: dict
-            .get("Status")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        log_stream_name: None,
-        raw_job_name: Some(name.to_string()),
-        job_name: Some(job_name),
-        created_at: None, // TODO : more fields
-        started_at: None,
-        stopped_at: None,
-        cloud_tags: None,
-        run_metadata: None,
-    })
+        let ps: Value = serde_json::from_str(line).inspect_err(|err| {
+            error!("Failed to parse docker ps output: {}", err);
+        })?;
+        debug!(?ps, "Parsed docker ps output");
+        let dict = ps
+            .as_object()
+            .ok_or(Error::Format("Invalid docker ps JSON format"))?;
+        // It could have multiple names but we expect just one?
+        let name = dict
+            .get("Names")
+            .and_then(Value::as_str)
+            .ok_or(Error::Format("Invalid names in docker ps output"))?;
+        let job_name = JobName::from_str(name)
+            .map_err(|err| Error::Format("$Can't parse job name from docker output"))?;
+        let docker_state = dict
+            .get("State")
+            .and_then(Value::as_str)
+            .ok_or(Error::Format("Invalid state in docker ps output"))?;
+        let container_id = dict
+            .get("ID")
+            .and_then(Value::as_str)
+            .ok_or(Error::Format("Invalid id in docker ps output"))?;
+        let status = match docker_state {
+            "running" => JobStatus::Running,
+            // TODO: Maybe check status and map to "failed"
+            "exited" => JobStatus::Completed,
+            _ => {
+                warn!("JobStatus::Unknown, docker_state: {}", docker_state);
+                JobStatus::Unknown
+            }
+        };
+        //"2025-08-24 10:29:23 -0700 PDT"
+        let created_at = dict.get("Created").and_then(|v| v.as_str())
+            .map(|c| OffsetDateTime::parse(c,
+            &format_description!("[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour][offset_minute] [ignore count:3]")).unwrap());
+        let cloud_tags: Option<HashMap<String, String>> =
+            dict.get("Labels").and_then(Value::as_str).map(|c| {
+                c.split(',')
+                    .flat_map(|s| {
+                        s.split_once('=')
+                            .map(|(k, v)| Some((k.to_string(), v.to_string())))
+                    })
+                    .flatten()
+                    .collect::<HashMap<String, String>>()
+            });
+        jobs.push(JobDescription {
+            cloud_job_id: CloudJobId(container_id.to_owned()),
+            status,
+            status_reason: dict
+                .get("Status")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            log_stream_name: None,
+            raw_job_name: Some(name.to_string()),
+            job_name: Some(job_name),
+            started_at: created_at, // not distinctly reported by Docker and pretty much the same time
+            created_at,
+            stopped_at: None, // not reported exactly but we could get it from the string in the status
+            cloud_tags,
+            run_metadata: None, // TODO: Decode from labels
+        })
+    }
+    Ok(jobs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_docker_ps_output() {
+        let json = r#"
+            {"Command":"\"bash -ex /job/scrip…\"","CreatedAt":"2025-08-24 10:29:23 -0700 PDT","ID":"97d224f70f1e","Image":"ghcr.io/sourcefrog/cargo-mutants:container","Labels":"mutants-remote/run-id=20250824-172923-7c72,org.opencontainers.image.source=https://github.com/rust-lang/docker-rust","LocalVolumes":"0","Mounts":"/home/mbp/.loc…","Names":"20250824-172923-7c72-shard-0000","Networks":"bridge","Ports":"","RunningFor":"About a minute ago","Size":"0B","State":"exited","Status":"Exited (0) 54 seconds ago"}
+        "#;
+        let jobs = parse_docker_ps_output(json).unwrap();
+        assert_eq!(jobs.len(), 1);
+        let job0 = &jobs[0];
+        assert_eq!(job0.cloud_job_id, CloudJobId::new("97d224f70f1e"));
+        assert_eq!(job0.status, JobStatus::Completed);
+        assert_eq!(
+            job0.status_reason.as_ref().unwrap(),
+            "Exited (0) 54 seconds ago"
+        );
+        assert_eq!(
+            job0.raw_job_name.as_ref().unwrap(),
+            "20250824-172923-7c72-shard-0000"
+        );
+        let mut tags = job0
+            .cloud_tags
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<Vec<(String, String)>>();
+        tags.sort();
+        assert_eq!(
+            tags,
+            &[
+                (
+                    "mutants-remote/run-id".to_string(),
+                    "20250824-172923-7c72".to_string()
+                ),
+                (
+                    "org.opencontainers.image.source".to_string(),
+                    "https://github.com/rust-lang/docker-rust".to_string()
+                ),
+            ]
+        );
+    }
 }
