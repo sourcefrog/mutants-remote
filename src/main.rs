@@ -42,7 +42,7 @@ static VERSION: &str = env!("CARGO_PKG_VERSION");
 static TOOL_NAME: &str = "mutants-remote";
 static SOURCE_TARBALL_NAME: &str = "source.tar.zstd";
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(name = "mutants-remote")]
 #[command(about = "Launch cargo-mutants into AWS Batch jobs")]
 struct Cli {
@@ -57,7 +57,7 @@ struct Cli {
     config: Option<PathBuf>,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 enum Commands {
     /// Remotely test cargo-mutants on a source directory
     #[command(visible_alias = "r")]
@@ -132,6 +132,7 @@ async fn inner_main() -> Result<()> {
     let run_id = RunId::from_clock();
     let tempdir = TempDir::with_prefix(format!("{TOOL_NAME}-{run_id}-"))?.keep();
     setup_tracing(&tempdir);
+    debug!(?cli);
 
     let config = Config::new(&cli.config)?;
     debug!(?config);
