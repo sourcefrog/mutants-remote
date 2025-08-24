@@ -337,6 +337,11 @@ async fn tar_source(
     for pat in exclude_patterns {
         child.arg("--exclude").arg(pat);
     }
+    #[cfg(target_os = "macos")]
+    {
+        child.arg("--exclude=.DS_Store");
+        child.arg("--no-xattrs");
+    }
     child.arg(".");
     let exit_status = child
         .spawn()
