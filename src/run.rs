@@ -124,3 +124,26 @@ impl std::fmt::Display for RunId {
         write!(f, "{}", self.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use regex::bytes::Regex;
+
+    use super::*;
+
+    #[test]
+    fn roundtrip_run_id() {
+        let id1 = RunId::from_clock();
+        let id = &id1.0;
+        let pattern = Regex::new(r"^20\d{6}-\d{6}-[a-f0-9]{5}$").unwrap();
+        assert!(
+            pattern.is_match(id.as_bytes()),
+            "Run ID does not match pattern: {id:?}"
+        );
+
+        let id2 = RunId::from_str(id).unwrap();
+        assert_eq!(id1, id2);
+
+        assert_eq!(&format!("{id1}"), id);
+    }
+}
