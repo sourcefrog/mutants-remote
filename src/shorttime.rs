@@ -7,6 +7,7 @@ use std::time::Duration;
 /// Formats a duration as a short string, containing hours, minutes, seconds,
 /// but only if they are non-zero. Only include seconds for shorter durations.
 pub fn format(duration: Duration) -> String {
+    // This could in principal be rewritten into Jiff spans.
     let mut parts = Vec::with_capacity(2);
     let mut r = (duration.as_millis() + 500) / 1000;
     if r == 0 {
@@ -29,7 +30,7 @@ pub fn format(duration: Duration) -> String {
         parts.push(format!("{}s", r));
     }
 
-    parts.join("")
+    parts.join(" ")
 }
 
 #[cfg(test)]
@@ -45,17 +46,17 @@ mod test {
         assert_eq!(format(Duration::from_millis(1000)), "1s");
         assert_eq!(format(Duration::from_millis(60000)), "1m");
         assert_eq!(format(Duration::from_millis(3600000)), "1h");
-        assert_eq!(format(Duration::from_millis(3660000)), "1h1m");
-        assert_eq!(format(Duration::from_millis(3661000)), "1h1m"); // seconds are omitted
-        assert_eq!(format(Duration::from_secs(3600 * 7 + 5 * 60 + 30)), "7h5m");
+        assert_eq!(format(Duration::from_millis(3660000)), "1h 1m");
+        assert_eq!(format(Duration::from_millis(3661000)), "1h 1m"); // seconds are omitted
+        assert_eq!(format(Duration::from_secs(3600 * 7 + 5 * 60 + 30)), "7h 5m");
         assert_eq!(
             format(Duration::from_secs(3600 * 24 * 7 + 3600 * 7 + 5 * 60 + 30)),
-            "7d7h5m"
+            "7d 7h 5m"
         );
         assert_eq!(
             format(Duration::from_secs(3600 * 24 * 7 + 5 * 60 + 30)),
-            "7d5m"
+            "7d 5m"
         );
-        assert_eq!(format(Duration::from_secs(3600 * 24 * 7 + 30)), "7d30s");
+        assert_eq!(format(Duration::from_secs(3600 * 24 * 7 + 30)), "7d 30s");
     }
 }
