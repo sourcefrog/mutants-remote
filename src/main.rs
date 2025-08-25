@@ -15,9 +15,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use jiff::Timestamp;
 use schemars::schema_for;
 use tempfile::TempDir;
-use time::OffsetDateTime;
 use tokio::process::Command;
 use tokio::time::sleep;
 use tracing::level_filters::LevelFilter;
@@ -203,8 +203,8 @@ async fn inner_main() -> Result<()> {
                 error!("Failed to parse duration {since:?}: {err}");
                 Error::Argument(err.to_string())
             })?;
-            let since = OffsetDateTime::now_utc()
-                .checked_sub(since.try_into().unwrap())
+            let since = Timestamp::now()
+                .checked_sub(jiff::SignedDuration::try_from(since).unwrap())
                 .unwrap();
             let mut jobs = cloud.list_jobs(Some(since)).await?;
             jobs.sort_by(|a, b| {

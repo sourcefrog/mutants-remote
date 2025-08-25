@@ -10,9 +10,9 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use aws_sdk_batch::operation::describe_job_definitions;
+use jiff::Timestamp;
 use serde_json::Value;
 use tempfile::NamedTempFile;
-use time::{OffsetDateTime, macros::format_description};
 use tokio::fs::{create_dir, create_dir_all};
 use tokio::process::Command;
 use tracing::{debug, error, warn};
@@ -175,7 +175,7 @@ impl Cloud for Docker {
     }
 
     /// List all jobs, including queued, running, and completed.
-    async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>> {
+    async fn list_jobs(&self, since: Option<Timestamp>) -> Result<Vec<JobDescription>> {
         // TODO: Filter by time over the result, since there doesn't seem to be a native Docker filter.
         container_ls(&format!("label={RUN_ID_TAG}")).await
     }
@@ -269,9 +269,10 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
             }
         };
         //"2025-08-24 10:29:23 -0700 PDT"
-        let created_at = dict.get("Created").and_then(|v| v.as_str())
-            .map(|c| OffsetDateTime::parse(c,
-            &format_description!("[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour][offset_minute] [ignore count:3]")).unwrap());
+        let created_at = dict
+            .get("Created")
+            .and_then(|v| v.as_str())
+            .and_then(|c| c.parse::<Timestamp>().ok());
         let cloud_tags: Option<HashMap<String, String>> =
             dict.get("Labels").and_then(Value::as_str).map(|c| {
                 c.split(',')

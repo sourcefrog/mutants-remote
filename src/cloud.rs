@@ -8,9 +8,9 @@ use std::{
 };
 
 use async_trait::async_trait;
+use jiff::Timestamp;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 use crate::{
     cloud::aws::AwsCloud,
@@ -56,7 +56,7 @@ pub trait Cloud: Debug {
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription>;
 
     /// List all jobs, including queued, running, and completed.
-    async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>>;
+    async fn list_jobs(&self, since: Option<Timestamp>) -> Result<Vec<JobDescription>>;
 
     /// Kill all jobs associated with a run.
     async fn kill(&self, kill_target: KillTarget) -> Result<()>;

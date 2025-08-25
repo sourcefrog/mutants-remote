@@ -17,11 +17,11 @@ clap = { version = "4.5", features = ["derive"] }
 derive_more = { version = "2.0.1", features = ["display"] }
 hostname = "0.4.1"
 humantime = "2.2.0"
+jiff = { version = "0.2", features = ["serde"] }
 serde_json = "1.0.142"
 serde = { version = "1.0.219", features = ["derive"] }
 tempfile = "3.20.0"
 thiserror = "1.0"
-time = { version = "0.3", features = ["formatting", "macros", "serde"] }
 tokio = { version = "1.47.1", features = ["full"] }
 toml = { version = "0.9.5", features = [
     "parse",
@@ -32,7 +32,9 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 whoami = { version = "1.6.1", default-features = false }
 schemars = "1.0.4"
-shell-quote = { version = "0.7.2", features = ["bash"], default-features = false }
+shell-quote = { version = "0.7.2", features = [
+    "bash",
+], default-features = false }
 dirs = "6.0.0"
 
 [dev-dependencies]

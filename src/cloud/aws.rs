@@ -22,7 +22,7 @@ use aws_sdk_cloudwatchlogs::types::StartLiveTailResponseStream;
 use aws_sdk_cloudwatchlogs::types::error::StartLiveTailResponseStreamError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
-use time::OffsetDateTime;
+use jiff::Timestamp;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Cloud, CloudJobId, LogTail};
@@ -422,12 +422,12 @@ impl Cloud for AwsCloud {
         Ok(())
     }
 
-    async fn list_jobs(&self, since: Option<OffsetDateTime>) -> Result<Vec<JobDescription>> {
+    async fn list_jobs(&self, since: Option<Timestamp>) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
         // TODO: Maybe filter to one queue?
         debug!(job_queue_name = ?self.job_queue_name, "Listing jobs");
         // We must set a filter to get jobs in all states.
-        let cutoff_unix_millis = since.map_or(0, |since| since.unix_timestamp() * 1000);
+        let cutoff_unix_millis = since.map_or(0, |since| since.as_millisecond());
         let filters = KeyValuesPair::builder()
             .name("AFTER_CREATED_AT")
             .values(cutoff_unix_millis.to_string())
@@ -616,9 +616,9 @@ impl<R: Debug + Send + Sync + 'static, E: std::error::Error + Sync + Send + 'sta
 }
 
 /// Convert from unix millis, treating 0 as unknown.
-fn from_unix_millis(t: Option<i64>) -> Option<OffsetDateTime> {
+fn from_unix_millis(t: Option<i64>) -> Option<Timestamp> {
     match t {
         Some(0) | None => None,
-        Some(t) => OffsetDateTime::from_unix_timestamp_nanos(t as i128 * 1_000_000).ok(),
+        Some(t) => Timestamp::from_millisecond(t).ok(),
     }
 }

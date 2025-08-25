@@ -6,8 +6,8 @@
 
 use std::{collections::HashMap, path::Path, str::FromStr};
 
+use jiff::Timestamp;
 use serde::Serialize;
-use time::{OffsetDateTime, macros::format_description};
 
 use crate::{
     error::{Error, Result},
@@ -95,18 +95,14 @@ pub struct RunId(String);
 impl RunId {
     /// Generate a probably-unique ID for a run.
     pub fn from_clock() -> RunId {
-        let now = OffsetDateTime::now_utc();
-        let time_str = now
-            .format(format_description!(
-                "[year][month][day]-[hour][minute][second]"
-            ))
-            .unwrap();
+        let now = Timestamp::now();
+        let time_str = now.strftime("%Y%m%d-%H%M%S").to_string();
         // Maybe it's quirky, but to make the strings easier to visually match,
         // we encode fractional seconds in hex.
         RunId(format!(
-            "{time}-{suffix:04x}",
+            "{time}-{suffix:05x}",
             time = time_str,
-            suffix = now.microsecond() & 0xFFFF
+            suffix = now.subsec_microsecond()
         ))
     }
 }

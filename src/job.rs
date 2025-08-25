@@ -4,9 +4,9 @@
 
 use std::{collections::HashMap, str::FromStr};
 
+use jiff::Timestamp;
 use serde::Serialize;
 use shell_quote::QuoteRefExt;
-use time::OffsetDateTime;
 use tracing::debug;
 
 use super::RunId;
@@ -70,15 +70,12 @@ pub struct JobDescription {
     pub job_name: Option<JobName>,
 
     /// The time when the job was created (submitted)
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub created_at: Option<OffsetDateTime>,
+    pub created_at: Option<Timestamp>,
 
     /// The time when the job started running
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub started_at: Option<OffsetDateTime>,
+    pub started_at: Option<Timestamp>,
 
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub stopped_at: Option<OffsetDateTime>,
+    pub stopped_at: Option<Timestamp>,
     pub cloud_tags: Option<HashMap<String, String>>,
     /// Structured metadata about the run this job is a part of.
     pub run_metadata: Option<RunMetadata>,
@@ -102,7 +99,7 @@ impl JobDescription {
     pub fn elapsed(&self) -> Option<std::time::Duration> {
         if !self.status.is_dead() {
             self.created_at
-                .and_then(|t| (OffsetDateTime::now_utc() - t).try_into().ok())
+                .and_then(|t| (Timestamp::now() - t).try_into().ok())
         } else {
             None
         }
