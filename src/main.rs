@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use jiff::Timestamp;
+use jiff::{Span, Zoned};
 use schemars::schema_for;
 use tempfile::TempDir;
 use tokio::process::Command;
@@ -100,7 +100,7 @@ enum Commands {
 
         /// Display runs that started within a recent period.
         #[arg(long, short = 's', default_value = "1 day")]
-        since: String,
+        since: Span,
     },
 
     /// Kill runs
@@ -198,15 +198,9 @@ async fn inner_main() -> Result<()> {
             verbose,
             since,
         } => {
-            // TODO: Maybe just make since optional?
-            let since = humantime::parse_duration(since).map_err(|err| {
-                error!("Failed to parse duration {since:?}: {err}");
-                Error::Argument(err.to_string())
-            })?;
-            let since = Timestamp::now()
-                .checked_sub(jiff::SignedDuration::try_from(since).unwrap())
-                .unwrap();
-            let mut jobs = cloud.list_jobs(Some(since)).await?;
+            let mut jobs = cloud
+                .list_jobs(Some(Zoned::now().checked_sub(since).unwrap().timestamp()))
+                .await?;
             jobs.sort_by(|a, b| {
                 a.created_at
                     .cmp(&b.created_at)

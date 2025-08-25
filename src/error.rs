@@ -5,6 +5,7 @@ use thiserror::Error;
 // TODO: Also try `thistermination` to give specific error codes...
 #[derive(Error, Debug)]
 pub enum Error {
+    #[allow(dead_code)]
     #[error("Bad argument: {0}")]
     Argument(String),
 
