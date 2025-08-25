@@ -18,3 +18,6 @@ pub static CLIENT_USERNAME_TAG: &str = "mutants-remote/client-username";
 
 /// The version of mutants-remote that launched this job.
 pub static MUTANTS_REMOTE_VERSION_TAG: &str = "mutants-remote/version";
+
+/// The rfc9557 time that the job was created.
+pub static RUN_START_TIME: &str = "mutants-remote/run-start-time";

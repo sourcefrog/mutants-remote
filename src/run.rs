@@ -12,7 +12,8 @@ use serde::Serialize;
 use crate::{
     error::{Error, Result},
     tags::{
-        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, SOURCE_DIR_TAIL_TAG,
+        CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_START_TIME,
+        SOURCE_DIR_TAIL_TAG,
     },
 };
 
@@ -33,6 +34,8 @@ pub struct RunMetadata {
     pub client_username: Option<String>,
     /// The version of mutants-remote that created this job.
     pub mutants_remote_version: Option<String>,
+    /// The start time of the run.
+    pub run_start_time: Option<Timestamp>,
 }
 
 impl RunMetadata {
@@ -46,12 +49,13 @@ impl RunMetadata {
                 .map(|h| h.to_string_lossy().into_owned()),
             client_username: Some(whoami::username()),
             mutants_remote_version: Some(crate::VERSION.to_string()),
+            run_start_time: Some(Timestamp::now()),
         }
     }
 
     /// Translate the metadata to a series of string tags.
     pub fn to_tags(&self) -> Vec<(&'static str, String)> {
-        let mut tags = Vec::with_capacity(4);
+        let mut tags = Vec::with_capacity(5);
         if let Some(dir) = &self.source_dir_tail {
             tags.push((SOURCE_DIR_TAIL_TAG, dir.to_string()));
         }
@@ -63,6 +67,9 @@ impl RunMetadata {
         }
         if let Some(version) = &self.mutants_remote_version {
             tags.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
+        }
+        if let Some(time) = &self.run_start_time {
+            tags.push((RUN_START_TIME, time.to_string()));
         }
         tags
     }
@@ -77,6 +84,7 @@ impl RunMetadata {
             client_hostname,
             client_username,
             mutants_remote_version,
+            run_start_time: tags.get(RUN_START_TIME).and_then(|s| s.parse().ok()),
         }
     }
 }
@@ -145,5 +153,18 @@ mod tests {
         assert_eq!(id1, id2);
 
         assert_eq!(&format!("{id1}"), id);
+    }
+
+    #[test]
+    fn roundtrip_run_metadata_through_tags() {
+        let metadata = RunMetadata::new(Path::new("foo"));
+        let tags: HashMap<String, String> = metadata
+            .to_tags()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        println!("{tags:?}");
+        let metadata2 = RunMetadata::from_tags(&tags);
+        assert_eq!(metadata, metadata2);
     }
 }

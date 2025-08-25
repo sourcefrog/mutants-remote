@@ -27,10 +27,15 @@ use crate::tags::RUN_ID_TAG;
 
 static JOB_MOUNT: &str = "/job";
 
+// TODO: Input and output from Docker is held in a `~/.local/share` directory, so that
+// it outlasts the individual container run. These will accumulate over time, and
+// garbage collection is not yet implemented.
+
 /// Docker cloud implementation.
 ///
 /// On Docker, the job name is set to the job name using the `--name` argument.
 /// The CloudJobName is the container id returned when the container is created.
+///
 #[derive(Debug)]
 pub struct Docker {
     /// Directory holding bind mounts to Docker for logs, output, etc.
@@ -115,13 +120,15 @@ impl Cloud for Docker {
             .arg(format!(
                 "--mount=type=bind,source={job_dir},target={JOB_MOUNT}",
                 job_dir = job_dir.display()
-            ))
-            .arg(self.config.image_name_or_default())
-            .args(["bash", "-ex"])
-            .arg(format!("{JOB_MOUNT}/script.sh"));
+            ));
         for (key, value) in run_metadata.to_tags() {
             command.arg(format!("--label={key}={value}"));
         }
+        // Caution: image name and args must come after all the options to Docker
+        command
+            .arg(self.config.image_name_or_default())
+            .args(["bash", "-ex"])
+            .arg(format!("{JOB_MOUNT}/script.sh"));
         debug!(?command);
         let mut child = command.spawn().inspect_err(|err| {
             error!("Failed to spawn docker container: {}", err);
@@ -268,11 +275,6 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
                 JobStatus::Unknown
             }
         };
-        //"2025-08-24 10:29:23 -0700 PDT"
-        let created_at = dict
-            .get("Created")
-            .and_then(|v| v.as_str())
-            .and_then(|c| c.parse::<Timestamp>().ok());
         let cloud_tags: Option<HashMap<String, String>> =
             dict.get("Labels").and_then(Value::as_str).map(|c| {
                 c.split(',')
@@ -284,6 +286,16 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
                     .collect::<HashMap<String, String>>()
             });
         let run_metadata = cloud_tags.as_ref().map(RunMetadata::from_tags);
+        // "2025-08-24 10:29:23 -0700 PDT", but apparently only present for containers that are still alive.
+        let docker_created_at = dict
+            .get("Created")
+            .and_then(|v| v.as_str())
+            .and_then(|c| c.parse::<Timestamp>().ok());
+        // Docker doesn't retain the start time for exited jobs so we use our own label if we have it.
+        let started_at = run_metadata
+            .as_ref()
+            .and_then(|m| m.run_start_time)
+            .or(docker_created_at);
         jobs.push(JobDescription {
             cloud_job_id: CloudJobId(container_id.to_owned()),
             status,
@@ -294,8 +306,8 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
             log_stream_name: None, // not relevant, just use the container id
             raw_job_name: Some(name.to_string()),
             job_name: Some(job_name),
-            started_at: created_at, // not distinctly reported by Docker and pretty much the same time
-            created_at,
+            started_at,
+            created_at: started_at,
             stopped_at: None, // not reported exactly but we could get it from the string in the status
             cloud_tags,
             run_metadata,
