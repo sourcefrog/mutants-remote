@@ -14,13 +14,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cloud::aws::AwsCloud,
-    cloud::docker::Docker,
+    cloud::{aws::AwsCloud, docker::Docker, k8s::Kubernetes},
     config::Config,
     error::Result,
     job::{JobDescription, JobName},
-    run::RunArgs,
-    run::{KillTarget, RunId, RunMetadata},
+    run::{KillTarget, RunArgs, RunId, RunMetadata},
 };
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -35,6 +33,7 @@ const CONTAINER_USER: &str = "mutants";
 
 pub mod aws;
 pub mod docker;
+pub mod k8s;
 
 /// Abstraction of a cloud provider that can launch jobs, read their status,
 /// fetch their logs or output tarball, etc.
@@ -68,6 +67,7 @@ pub async fn open_cloud(config: &Config) -> Result<Box<dyn Cloud>> {
     match config.cloud_provider.unwrap_or(CloudProvider::AwsBatch) {
         CloudProvider::AwsBatch => Ok(Box::new(AwsCloud::new(config.clone()).await?)),
         CloudProvider::Docker => Ok(Box::new(Docker::new(config.clone())?)),
+        CloudProvider::Kubernetes => Ok(Box::new(Kubernetes::new(config.clone()).await?)),
     }
 }
 
@@ -104,4 +104,8 @@ pub enum CloudProvider {
     AwsBatch,
     /// Run in Docker
     Docker,
+
+    /// Run on Kubernetes
+    #[value(alias("k8s"))]
+    Kubernetes,
 }

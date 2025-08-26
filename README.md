@@ -1,9 +1,8 @@
 # mutants-remote: Run cargo-mutants in the cloud
 
-An experimental tool to launch [cargo-mutants](https://github.com/sourcefrog/cargo-mutants) into AWS Batch jobs.
-(There's room to later expand this to other remote environments such as other public clouds or k8s.)
+An experimental tool to launch [cargo-mutants](https://github.com/sourcefrog/cargo-mutants) into k8s or AWS Batch jobs.
 
-⚠️ This is probably not usable by anyone else yet.
+⚠️ This is at an early stage of development and may not be usable by anyone else yet.
 
 ## Setup
 

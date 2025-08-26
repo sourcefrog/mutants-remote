@@ -15,10 +15,22 @@ async-trait = "0.1"
 bytes = "1.10.1"
 clap = { version = "4.5", features = ["derive"] }
 derive_more = { version = "2.0.1", features = ["display"] }
+dirs = "6.0.0"
 hostname = "0.4.1"
 jiff = { version = "0.2", features = ["serde"] }
+kube = { version = "1.1.0", default-features = false, features = [
+    "client",
+    "rustls-tls",
+    "runtime",
+    "derive",
+] }
+k8s-openapi = { version = "0.25.0", features = ["latest"] }
+schemars = "1.0.4"
 serde_json = "1.0.142"
 serde = { version = "1.0.219", features = ["derive"] }
+shell-quote = { version = "0.7.2", features = [
+    "bash",
+], default-features = false }
 tempfile = "3.20.0"
 thiserror = "1.0"
 tokio = { version = "1.47.1", features = ["full"] }
@@ -30,11 +42,6 @@ toml = { version = "0.9.5", features = [
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 whoami = { version = "1.6.1", default-features = false }
-schemars = "1.0.4"
-shell-quote = { version = "0.7.2", features = [
-    "bash",
-], default-features = false }
-dirs = "6.0.0"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
