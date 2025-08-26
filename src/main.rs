@@ -32,7 +32,7 @@ mod run;
 mod shorttime;
 mod tags;
 
-use crate::cloud::{Cloud, CloudJobId, open_cloud};
+use crate::cloud::{Cloud, CloudJobId, CloudProvider, open_cloud};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::JobStatus;
@@ -55,6 +55,12 @@ struct Cli {
     /// not exist, built-in defaults will be used.
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+
+    /// Choice of cloud provider to use
+    ///
+    /// Corresponds to the `cloud_provider` field in the configuration file.
+    #[arg(long = "cloud", short = 'C', global = true)]
+    cloud_provider: Option<CloudProvider>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,8 +140,11 @@ async fn inner_main() -> Result<()> {
     setup_tracing(&tempdir);
     debug!(?cli);
 
-    let config = Config::new(&cli.config)?;
-    debug!(?config);
+    let mut config = Config::new(&cli.config)?;
+    debug!(?config, "Config from file");
+    if let Some(c) = cli.cloud_provider {
+        config.cloud_provider = Some(c);
+    }
     let cloud = open_cloud(&config).await?;
     debug!(?cloud);
 

@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use clap::ValueEnum;
 use jiff::Timestamp;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -97,7 +98,7 @@ pub trait LogTail {
     async fn more_log_events(&mut self) -> Result<Option<Vec<String>>>;
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, JsonSchema, ValueEnum)]
 pub enum CloudProvider {
     /// Run on AWS Batch
     AwsBatch,
