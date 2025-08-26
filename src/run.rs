@@ -25,7 +25,7 @@ pub struct RunArgs {
 
 /// Additional metadata attached to all the resources in one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RunMetadata {
+pub struct RunLabels {
     /// The tail of the source directory path.
     pub source_dir_tail: Option<String>,
     /// The client hostname.
@@ -38,9 +38,9 @@ pub struct RunMetadata {
     pub run_start_time: Option<Timestamp>,
 }
 
-impl RunMetadata {
+impl RunLabels {
     pub fn new(source_dir: &Path) -> Self {
-        RunMetadata {
+        RunLabels {
             source_dir_tail: source_dir
                 .file_name()
                 .map(|f| f.to_string_lossy().into_owned()),
@@ -79,7 +79,7 @@ impl RunMetadata {
         let client_hostname = tags.get(CLIENT_HOSTNAME_TAG).cloned();
         let client_username = tags.get(CLIENT_USERNAME_TAG).cloned();
         let mutants_remote_version = tags.get(MUTANTS_REMOTE_VERSION_TAG).cloned();
-        RunMetadata {
+        RunLabels {
             source_dir_tail,
             client_hostname,
             client_username,
@@ -156,15 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_run_metadata_through_tags() {
-        let metadata = RunMetadata::new(Path::new("foo"));
+    fn roundtrip_run_labels_through_tags() {
+        let metadata = RunLabels::new(Path::new("foo"));
         let tags: HashMap<String, String> = metadata
             .to_tags()
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
         println!("{tags:?}");
-        let metadata2 = RunMetadata::from_tags(&tags);
+        let metadata2 = RunLabels::from_tags(&tags);
         assert_eq!(metadata, metadata2);
     }
 }

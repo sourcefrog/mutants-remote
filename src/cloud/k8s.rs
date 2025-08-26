@@ -25,7 +25,7 @@ use crate::{
     config::Config,
     error::{Error, Result},
     job::{JobDescription, JobName, JobStatus},
-    run::{KillTarget, RunArgs, RunId, RunMetadata},
+    run::{KillTarget, RunArgs, RunId, RunLabels},
 };
 
 pub struct Kubernetes {
@@ -48,10 +48,11 @@ impl Cloud for Kubernetes {
     async fn submit(
         &self,
         run_id: &RunId,
-        run_metadata: &RunMetadata,
+        run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
+        // TODO: Copy the source tarball to some storage location accessible to the job
         todo!("Kubernetes::submit")
     }
 
@@ -119,7 +120,7 @@ impl TryFrom<K8sJob> for JobDescription {
             started_at: None,
             stopped_at: None,
             cloud_tags: None,
-            run_metadata: None,
+            run_labels: None,
         })
     }
 }

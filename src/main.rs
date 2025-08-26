@@ -36,7 +36,7 @@ use crate::cloud::{Cloud, CloudJobId, CloudProvider, open_cloud};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::JobStatus;
-use crate::run::{KillTarget, RunArgs, RunId, RunMetadata};
+use crate::run::{KillTarget, RunArgs, RunId, RunLabels};
 
 static VERSION: &str = env!("CARGO_PKG_VERSION");
 static TOOL_NAME: &str = "mutants-remote";
@@ -156,7 +156,7 @@ async fn inner_main() -> Result<()> {
             source,
         } => {
             assert_eq!(*shards, 1, "Multiple shards are not supported yet");
-            let run_metadata = RunMetadata::new(source);
+            let run_labels = RunLabels::new(source);
             let run_args = RunArgs {
                 cargo_mutants_args: cargo_mutants_args
                     .clone()
@@ -173,7 +173,7 @@ async fn inner_main() -> Result<()> {
 
             info!("Submitting job");
             let (job_name, cloud_job_id) = cloud
-                .submit(&run_id, &run_metadata, &run_args, &source_tarball_path)
+                .submit(&run_id, &run_labels, &run_args, &source_tarball_path)
                 .await
                 .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 

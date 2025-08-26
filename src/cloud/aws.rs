@@ -33,7 +33,7 @@ use crate::{
 use crate::{
     config::Config,
     job::{JobDescription, JobName, JobStatus},
-    run::{KillTarget, RunId, RunMetadata},
+    run::{KillTarget, RunId, RunLabels},
 };
 use crate::{
     run::RunArgs,
@@ -228,7 +228,7 @@ impl Cloud for AwsCloud {
     async fn submit(
         &self,
         run_id: &RunId,
-        run_metadata: &RunMetadata,
+        run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
@@ -319,7 +319,7 @@ impl Cloud for AwsCloud {
             .tags(RUN_ID_TAG, run_id.to_string())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides);
-        for (key, value) in run_metadata.to_tags() {
+        for (key, value) in run_labels.to_tags() {
             builder = builder.tags(key, value);
         }
         let result = builder
@@ -365,7 +365,7 @@ impl Cloud for AwsCloud {
             .tags
             .as_ref()
             .map_or_else(HashMap::new, HashMap::clone);
-        let run_metadata = Some(RunMetadata::from_tags(&tags));
+        let run_labels = Some(RunLabels::from_tags(&tags));
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
             status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
@@ -377,7 +377,7 @@ impl Cloud for AwsCloud {
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
             cloud_tags: job_detail.tags.clone(),
-            run_metadata,
+            run_labels,
         })
     }
 

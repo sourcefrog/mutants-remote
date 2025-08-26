@@ -22,7 +22,7 @@ use crate::cloud::{CONTAINER_USER, Cloud, CloudJobId, LogTail, OUTPUT_TARBALL_NA
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::{JobDescription, JobName, JobStatus, central_command};
-use crate::run::{KillTarget, RunArgs, RunId, RunMetadata};
+use crate::run::{KillTarget, RunArgs, RunId, RunLabels};
 use crate::tags::RUN_ID_TAG;
 
 static JOB_MOUNT: &str = "/job";
@@ -76,7 +76,7 @@ impl Cloud for Docker {
     async fn submit(
         &self,
         run_id: &RunId,
-        run_metadata: &RunMetadata,
+        run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
@@ -121,7 +121,7 @@ impl Cloud for Docker {
                 "--mount=type=bind,source={job_dir},target={JOB_MOUNT}",
                 job_dir = job_dir.display()
             ));
-        for (key, value) in run_metadata.to_tags() {
+        for (key, value) in run_labels.to_tags() {
             command.arg(format!("--label={key}={value}"));
         }
         // Caution: image name and args must come after all the options to Docker
@@ -285,14 +285,14 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
                     .flatten()
                     .collect::<HashMap<String, String>>()
             });
-        let run_metadata = cloud_tags.as_ref().map(RunMetadata::from_tags);
+        let run_labels = cloud_tags.as_ref().map(RunLabels::from_tags);
         // "2025-08-24 10:29:23 -0700 PDT", but apparently only present for containers that are still alive.
         let docker_created_at = dict
             .get("Created")
             .and_then(|v| v.as_str())
             .and_then(|c| c.parse::<Timestamp>().ok());
         // Docker doesn't retain the start time for exited jobs so we use our own label if we have it.
-        let started_at = run_metadata
+        let started_at = run_labels
             .as_ref()
             .and_then(|m| m.run_start_time)
             .or(docker_created_at);
@@ -310,7 +310,7 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
             created_at: started_at,
             stopped_at: None, // not reported exactly but we could get it from the string in the status
             cloud_tags,
-            run_metadata,
+            run_labels,
         })
     }
     Ok(jobs)

@@ -18,7 +18,7 @@ use crate::{
     config::Config,
     error::Result,
     job::{JobDescription, JobName},
-    run::{KillTarget, RunArgs, RunId, RunMetadata},
+    run::{KillTarget, RunArgs, RunId, RunLabels},
 };
 
 static OUTPUT_TARBALL_NAME: &str = "mutants.out.tar.zstd";
@@ -45,7 +45,7 @@ pub trait Cloud: Debug {
     async fn submit(
         &self,
         run_id: &RunId,
-        run_metadata: &RunMetadata,
+        run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)>; // TODO: Should return a vec of all the jobs, or a struct

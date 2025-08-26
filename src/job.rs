@@ -12,7 +12,7 @@ use tracing::debug;
 use super::RunId;
 use crate::{
     cloud::CloudJobId,
-    run::{RunArgs, RunMetadata},
+    run::{RunArgs, RunLabels},
 };
 
 /// Name assigned by us to a job within a run, including the run id.
@@ -78,7 +78,7 @@ pub struct JobDescription {
     pub stopped_at: Option<Timestamp>,
     pub cloud_tags: Option<HashMap<String, String>>,
     /// Structured metadata about the run this job is a part of.
-    pub run_metadata: Option<RunMetadata>,
+    pub run_labels: Option<RunLabels>,
 }
 
 impl JobDescription {
