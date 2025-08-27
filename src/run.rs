@@ -53,21 +53,31 @@ impl RunLabels {
         }
     }
 
-    /// Translate the metadata to a series of string tags.
-    pub fn to_tags(&self) -> Vec<(&'static str, String)> {
-        let mut tags = Vec::with_capacity(5);
+    /// Translate metadata to "labels".
+    ///
+    /// Labels in k8s are constrained in what characters can occur in the values,
+    /// are searchable, and are intended to be used only for identification and
+    /// filtering.
+    pub fn to_labels(&self) -> Vec<(&'static str, String)> {
+        let mut labels = Vec::with_capacity(5);
         if let Some(dir) = &self.source_dir_tail {
-            tags.push((SOURCE_DIR_TAIL_TAG, dir.to_string()));
+            labels.push((SOURCE_DIR_TAIL_TAG, dir.to_string()));
         }
         if let Some(host) = &self.client_hostname {
-            tags.push((CLIENT_HOSTNAME_TAG, host.to_string()));
+            labels.push((CLIENT_HOSTNAME_TAG, host.to_string()));
         }
         if let Some(user) = &self.client_username {
-            tags.push((CLIENT_USERNAME_TAG, user.to_string()));
+            labels.push((CLIENT_USERNAME_TAG, user.to_string()));
         }
         if let Some(version) = &self.mutants_remote_version {
-            tags.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
+            labels.push((MUTANTS_REMOTE_VERSION_TAG, version.to_string()));
         }
+        labels
+    }
+
+    /// Translate the metadata to a series of string tags.
+    pub fn to_tags(&self) -> Vec<(&'static str, String)> {
+        let mut tags = self.to_labels();
         if let Some(time) = &self.run_start_time {
             tags.push((RUN_START_TIME, time.to_string()));
         }
