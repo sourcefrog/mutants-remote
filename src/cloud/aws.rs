@@ -368,7 +368,7 @@ impl Cloud for AwsCloud {
         let run_labels = Some(RunLabels::from_tags(&tags));
         Ok(JobDescription {
             cloud_job_id: job_id.clone(),
-            status: JobStatus::from(description.jobs()[0].status().unwrap().to_owned()),
+            status: JobStatus::from(description.jobs()[0].status()),
             status_reason: job_detail.status_reason().map(ToOwned::to_owned),
             log_stream_name,
             raw_job_name,
@@ -490,8 +490,8 @@ impl Cloud for AwsCloud {
     }
 }
 
-impl From<AwsJobStatus> for JobStatus {
-    fn from(status: AwsJobStatus) -> Self {
+impl From<&AwsJobStatus> for JobStatus {
+    fn from(status: &AwsJobStatus) -> Self {
         match status {
             // A constraint here is that the log stream will only exist once the job becomes Running
             // so we treat everything else as pending.
@@ -506,6 +506,15 @@ impl From<AwsJobStatus> for JobStatus {
                 warn!("Unknown AWS job status: {status:?}");
                 JobStatus::Unknown
             }
+        }
+    }
+}
+
+impl From<Option<&AwsJobStatus>> for JobStatus {
+    fn from(status: Option<&AwsJobStatus>) -> Self {
+        match status {
+            Some(status) => JobStatus::from(status),
+            None => JobStatus::Unknown,
         }
     }
 }
