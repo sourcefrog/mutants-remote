@@ -2,18 +2,14 @@
 
 //! Spawn tasks in Docker containers.
 
-#![allow(unused)] // until implemented
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use aws_sdk_batch::operation::describe_job_definitions;
 use jiff::Timestamp;
 use serde_json::Value;
-use tempfile::NamedTempFile;
-use tokio::fs::{create_dir, create_dir_all};
+use tokio::fs::create_dir_all;
 use tokio::process::Command;
 use tracing::{debug, error, warn};
 
@@ -55,10 +51,11 @@ impl Docker {
                 state_dir.display(),
                 err
             )
-        });
+        })?;
         Ok(Self { state_dir, config })
     }
 
+    #[allow(dead_code)]
     fn run_dir(&self, run_id: &RunId) -> PathBuf {
         self.state_dir.join(run_id.to_string())
     }
@@ -144,7 +141,7 @@ impl Cloud for Docker {
         let container_id = std::fs::read(&container_id_path)
             .inspect_err(|err| error!("Failed to read container ID file: {}", err))?;
         let container_id = String::from_utf8(container_id)
-            .map_err(|err| Error::Format("Container id is not UTF-8"))?
+            .map_err(|_| Error::Format("Container id is not UTF-8"))?
             .trim()
             .to_owned();
         if container_id.is_empty() {
@@ -166,7 +163,7 @@ impl Cloud for Docker {
         Ok(dest_path)
     }
 
-    async fn tail_log(&self, job_description: &JobDescription) -> Result<Box<dyn LogTail>> {
+    async fn tail_log(&self, _job_description: &JobDescription) -> Result<Box<dyn LogTail>> {
         todo!("Docker::tail_log")
     }
 
@@ -182,7 +179,7 @@ impl Cloud for Docker {
     }
 
     /// List all jobs, including queued, running, and completed.
-    async fn list_jobs(&self, since: Option<Timestamp>) -> Result<Vec<JobDescription>> {
+    async fn list_jobs(&self, _since: Option<Timestamp>) -> Result<Vec<JobDescription>> {
         // TODO: Filter by time over the result, since there doesn't seem to be a native Docker filter.
         container_ls(&format!("label={RUN_ID_TAG}")).await
     }
@@ -257,7 +254,7 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
             .and_then(Value::as_str)
             .ok_or(Error::Format("Invalid names in docker ps output"))?;
         let job_name = JobName::from_str(name)
-            .map_err(|err| Error::Format("$Can't parse job name from docker output"))?;
+            .map_err(|_| Error::Format("$Can't parse job name from docker output"))?;
         let docker_state = dict
             .get("State")
             .and_then(Value::as_str)
