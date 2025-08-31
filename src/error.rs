@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum Error {
     #[allow(dead_code)]
     #[error("Bad argument: {0}")]
-    Argument(String),
+    Argument(&'static str),
 
     #[error("Invalid Run ID: {0}")]
     InvalidRunId(String),
