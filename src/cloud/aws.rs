@@ -232,8 +232,9 @@ impl Cloud for AwsCloud {
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
+        let shards: usize = run_args.shards;
+        assert!(shards > 0, "Shard count must be greater than zero");
         let shard_k = 0;
-        let shard_n = 1;
         let job_name = JobName {
             run_id: run_id.clone(),
             shard_k,
@@ -243,7 +244,7 @@ impl Cloud for AwsCloud {
 
         // Because AWS apparently has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
-        let script = central_command(run_args, shard_k, shard_n);
+        let script = central_command(run_args, shard_k, shards);
         let script_key = format!("{}/script.sh", self.run_prefix(run_id));
         let wrapped_script = format!(
             "

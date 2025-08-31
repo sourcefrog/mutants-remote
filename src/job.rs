@@ -140,7 +140,7 @@ impl JobStatus {
 /// Return the main command to be run.
 ///
 /// This can be wrapped in cloud-specific commands.
-pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: u32) -> String {
+pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: impl ToString) -> String {
     // TODO: Maybe Vec<String> instead?
     let script = format!(
         "cargo mutants {cargo_mutants_args} --shard {shard_k}/{shard_n} -vV || true",
@@ -149,7 +149,8 @@ pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: u32) -> String
             .iter()
             .map(|a| a.quoted(shell_quote::Bash))
             .collect::<Vec<String>>()
-            .join(" ")
+            .join(" "),
+        shard_n = shard_n.to_string()
     );
     debug!(?script);
     script

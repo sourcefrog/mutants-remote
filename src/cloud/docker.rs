@@ -81,6 +81,10 @@ impl Cloud for Docker {
         let job_dir = self.job_dir(&job_name);
         create_dir_all(&job_dir).await?;
         let container_id_path = job_dir.join("container_id");
+        assert_eq!(
+            run_args.shards, 1,
+            "Multiple shards are not supported yet on Docker"
+        );
 
         tokio::fs::copy(source_tarball, job_dir.join(SOURCE_TARBALL_NAME)).await?;
 

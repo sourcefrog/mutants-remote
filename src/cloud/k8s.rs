@@ -66,6 +66,10 @@ impl Cloud for Kubernetes {
     ) -> Result<(JobName, CloudJobId)> {
         // TODO: Copy the source tarball to some storage location accessible to the job
         // TODO: Spawn indexed jobs for the shards? Or just multiple jobs?
+        assert_eq!(
+            run_args.shards, 1,
+            "Multiple shards are not supported yet on Docker"
+        );
         let shard_k = 0;
         let job_name = JobName::new(run_id, shard_k);
         let name_string = job_name.to_string();
@@ -77,6 +81,7 @@ impl Cloud for Kubernetes {
                 .collect(),
         );
         // TODO: Set command, image, etc
+        // TODO: For local jobs, make a host volume pointing to a directory with the temporary source tarball
         let job = K8sJob {
             metadata: ObjectMeta {
                 name: Some(name_string.clone()),
@@ -95,7 +100,6 @@ impl Cloud for Kubernetes {
                                     .map(|s| s.to_string())
                                     .collect(),
                             ),
-                            // TODO: Should some be in args not command?
                             ..Default::default()
                         }],
                         restart_policy: Some("Never".to_owned()),

@@ -74,7 +74,7 @@ enum Commands {
 
         /// Total number of shards
         #[arg(long, default_value = "1")]
-        shards: u32,
+        shards: usize,
 
         /// Exclude files and directories matching this pattern from the source directory
         ///
@@ -155,7 +155,8 @@ async fn inner_main() -> Result<()> {
             shards,
             source,
         } => {
-            assert_eq!(*shards, 1, "Multiple shards are not supported yet");
+            let shards = *shards;
+            assert_eq!(shards, 1, "Multiple shards are not supported yet");
             let run_labels = RunLabels::new(source);
             let run_args = RunArgs {
                 cargo_mutants_args: cargo_mutants_args
@@ -163,6 +164,7 @@ async fn inner_main() -> Result<()> {
                     .into_iter()
                     .chain(config.cargo_mutants_args.iter().cloned())
                     .collect(),
+                shards,
             };
             debug!(?run_args);
             let mut exclude_patterns = copy_exclude.clone();

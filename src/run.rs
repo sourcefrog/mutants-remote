@@ -20,7 +20,11 @@ use crate::{
 /// Additional arguments for the run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunArgs {
+    /// Extra arguments to pass to `cargo mutants`.
     pub cargo_mutants_args: Vec<String>,
+
+    /// Number of parallel jobs to run.
+    pub shards: usize,
 }
 
 /// Additional metadata attached to all the resources in one run.
