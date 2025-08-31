@@ -232,9 +232,6 @@ impl Cloud for AwsCloud {
         run_args: &RunArgs,
         source_tarball: &Path,
     ) -> Result<(JobName, CloudJobId)> {
-        // Because AWS has modest limits on the length of the size of the job overrides we upload
-        // the script to S3 and then fetch that object.
-        let script_key = format!("{}/script.sh", self.run_prefix(run_id));
         let shard_k = 0;
         let shard_n = 1;
         let job_name = JobName {
@@ -244,7 +241,10 @@ impl Cloud for AwsCloud {
         let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
         let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
+        // Because AWS apparently has modest limits on the length of the size of the job overrides we upload
+        // the script to S3 and then fetch that object.
         let script = central_command(run_args, shard_k, shard_n);
+        let script_key = format!("{}/script.sh", self.run_prefix(run_id));
         let wrapped_script = format!(
             "
             free -m && id && pwd && df -m &&
@@ -261,7 +261,8 @@ impl Cloud for AwsCloud {
             aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
             ",
         );
-        debug!(?wrapped_script);
+        let script_s3_url = self.s3_url(&script_key);
+        debug!(?wrapped_script, ?script_s3_url, "Uploading script to S3");
         self.put_object(
             &script_key,
             ByteStream::from(Bytes::from(wrapped_script)),
@@ -269,13 +270,8 @@ impl Cloud for AwsCloud {
         )
         .await?;
 
-        let script_s3_url = self.s3_url(&script_key);
-        let full_command = format!(
-            "aws s3 cp {script_s3_url} /tmp/script.sh &&
-            bash -ex /tmp/script.sh
-            ",
-        );
-        debug!(?script_s3_url, "Uploading script to S3");
+        let full_command =
+            format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh",);
 
         info!("Submitting job");
         let mut task_container_overrides = TaskContainerOverrides::builder()
