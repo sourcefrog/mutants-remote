@@ -203,6 +203,43 @@ impl AwsCloud {
         self.put_object(key, source_tarball_body, run_id).await?;
         Ok(self.s3_url(key))
     }
+
+    /// Write a script that can be run by any job to S3.
+    ///
+    /// Because AWS apparently has modest limits on the length of the size of the job overrides we upload
+    /// the script to S3 and then fetch that object.
+    async fn upload_script(
+        &self,
+        run_id: &RunId,
+        run_args: &RunArgs,
+        source_tarball_s3_url: &str,
+    ) -> Result<String> {
+        let script = central_command(run_args, "${MUTANTS_REMOTE_SHARD}", run_args.shards);
+        let script_key = format!("{}/script.sh", self.run_prefix(run_id));
+        let wrapped_script = format!(
+            r#"
+        free -m && id && pwd && df -m &&
+        cd && pwd &&
+        export CARGO_HOME=$HOME/.cargo &&
+        aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
+        mkdir work &&
+        cd work &&
+        tar xf /tmp/mutants.tar.zst --zstd &&
+        {script}
+        tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
+        aws s3 cp /tmp/mutants.out.tar.zstd ${{MUTANTS_REMOTE_OUTPUT}}
+        "#,
+        );
+        let script_s3_url = self.s3_url(&script_key);
+        debug!(?wrapped_script, ?script_s3_url, "Uploading script to S3");
+        self.put_object(
+            &script_key,
+            ByteStream::from(Bytes::from(wrapped_script)),
+            run_id,
+        )
+        .await?;
+        Ok(script_s3_url)
+    }
 }
 
 /// Find the default bucket created by Terraform.
@@ -235,42 +272,16 @@ impl Cloud for AwsCloud {
         let shards: usize = run_args.shards;
         assert!(shards > 0, "Shard count must be greater than zero");
         let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
-
-        // Because AWS apparently has modest limits on the length of the size of the job overrides we upload
-        // the script to S3 and then fetch that object.
-        let script = central_command(run_args, "${MUTANTS_REMOTE_SHARD}", shards);
-        let script_key = format!("{}/script.sh", self.run_prefix(run_id));
-        let job_name = JobName::new(run_id, 0);
-        let output_tarball_url = self.output_tarball_s3_url(&job_name);
-        let wrapped_script = format!(
-            r#"
-            free -m && id && pwd && df -m &&
-            cd &&
-            pwd &&
-            echo $HOME &&
-            export CARGO_HOME=$HOME/.cargo &&
-            aws s3 cp {source_tarball_s3_url} /tmp/mutants.tar.zst &&
-            mkdir work &&
-            cd work &&
-            tar xf /tmp/mutants.tar.zst --zstd &&
-            {script}
-            tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
-            aws s3 cp /tmp/mutants.out.tar.zstd ${{MUTANTS_REMOTE_OUTPUT}}
-            "#,
-        );
-        let script_s3_url = self.s3_url(&script_key);
-        debug!(?wrapped_script, ?script_s3_url, "Uploading script to S3");
-        self.put_object(
-            &script_key,
-            ByteStream::from(Bytes::from(wrapped_script)),
-            run_id,
-        )
-        .await?;
+        let script_s3_url = self
+            .upload_script(run_id, run_args, &source_tarball_s3_url)
+            .await?;
 
         let full_command =
             format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh",);
 
-        info!("Submitting job");
+        let job_name = JobName::new(run_id, 0);
+        info!(?job_name, "Submitting job");
+        let output_tarball_url = self.output_tarball_s3_url(&job_name);
         let mut task_container_overrides = TaskContainerOverrides::builder()
             .set_command(Some(vec![
                 "bash".to_owned(),

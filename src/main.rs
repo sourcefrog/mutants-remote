@@ -156,7 +156,6 @@ async fn inner_main() -> Result<()> {
             source,
         } => {
             let shards = *shards;
-            assert_eq!(shards, 1, "Multiple shards are not supported yet");
             let run_labels = RunLabels::new(source);
             let run_args = RunArgs {
                 cargo_mutants_args: cargo_mutants_args
