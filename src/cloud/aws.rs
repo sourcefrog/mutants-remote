@@ -240,56 +240,24 @@ impl AwsCloud {
         .await?;
         Ok(script_s3_url)
     }
-}
 
-/// Find the default bucket created by Terraform.
-async fn find_default_bucket(s3_client: &aws_sdk_s3::Client) -> Result<String> {
-    let response = s3_client.list_buckets().send().await?;
-    match response.buckets.unwrap_or_default().iter().find(|bucket| {
-        bucket
-            .name()
-            .unwrap_or_default()
-            .starts_with(DEFAULT_BUCKET_PREFIX)
-    }) {
-        Some(bucket) => {
-            let name = bucket.name().expect("Bucket should have a name");
-            debug!("Found default bucket: {name}");
-            Ok(name.to_string())
-        }
-        None => Err(Error::Cloud("No default bucket found".into())),
-    }
-}
-
-#[async_trait]
-impl Cloud for AwsCloud {
-    async fn submit(
+    async fn submit_job(
         &self,
-        run_id: &RunId,
+        job_name: &JobName,
         run_labels: &RunLabels,
-        run_args: &RunArgs,
-        source_tarball: &Path,
-    ) -> Result<RunTicket> {
-        let shards: usize = run_args.shards;
-        assert!(shards > 0, "Shard count must be greater than zero");
-        let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
-        let script_s3_url = self
-            .upload_script(run_id, run_args, &source_tarball_s3_url)
-            .await?;
-
-        let full_command =
-            format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh");
-
-        let job_name = JobName::new(run_id, 0);
+        script_s3_url: &str,
+    ) -> Result<CloudJobId> {
         info!(?job_name, "Submitting job");
-        let output_tarball_url = self.output_tarball_s3_url(&job_name);
+        let output_tarball_url = self.output_tarball_s3_url(job_name);
+
         let mut task_container_overrides = TaskContainerOverrides::builder()
-            .set_command(Some(vec![
-                "bash".to_owned(),
-                "-exc".to_owned(),
-                full_command,
-            ]))
-            .set_name(Some("mutants-remote".to_owned())) // container name
-            ;
+        .set_command(Some(vec![
+            "bash".to_owned(),
+            "-exc".to_owned(),
+            format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh"),
+        ]))
+        .set_name(Some("mutants-remote".to_owned())) // container name
+        ;
         if let Some(vcpus) = self.config.vcpus {
             task_container_overrides = task_container_overrides.resource_requirements(
                 ResourceRequirement::builder()
@@ -333,7 +301,7 @@ impl Cloud for AwsCloud {
             .job_name(job_name.to_string())
             .job_queue(&self.job_queue_name)
             .job_definition(&self.job_definition_name)
-            .tags(RUN_ID_TAG, run_id.to_string())
+            .tags(RUN_ID_TAG, job_name.run_id.to_string())
             .tags(OUTPUT_TARBALL_URL_TAG, output_tarball_url.clone())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides);
@@ -344,12 +312,58 @@ impl Cloud for AwsCloud {
             .send()
             .await
             .inspect_err(|err| error!(?err, "SubmitJob failed"))?;
-
         let cloud_job_id = CloudJobId::new(result.job_id().expect("submitted job id"));
         info!(?cloud_job_id, "Job submitted successfully: {:?}", result);
+        Ok(cloud_job_id)
+    }
+}
+
+/// Find the default bucket created by Terraform.
+async fn find_default_bucket(s3_client: &aws_sdk_s3::Client) -> Result<String> {
+    let response = s3_client.list_buckets().send().await?;
+    match response.buckets.unwrap_or_default().iter().find(|bucket| {
+        bucket
+            .name()
+            .unwrap_or_default()
+            .starts_with(DEFAULT_BUCKET_PREFIX)
+    }) {
+        Some(bucket) => {
+            let name = bucket.name().expect("Bucket should have a name");
+            debug!("Found default bucket: {name}");
+            Ok(name.to_string())
+        }
+        None => Err(Error::Cloud("No default bucket found".into())),
+    }
+}
+
+#[async_trait]
+impl Cloud for AwsCloud {
+    async fn submit(
+        &self,
+        run_id: &RunId,
+        run_labels: &RunLabels,
+        run_args: &RunArgs,
+        source_tarball: &Path,
+    ) -> Result<RunTicket> {
+        let shards: usize = run_args.shards;
+        assert!(shards > 0, "Shard count must be greater than zero");
+        let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
+        let script_s3_url = self
+            .upload_script(run_id, run_args, &source_tarball_s3_url)
+            .await?;
+
+        let mut jobs = Vec::new();
+        for shard in 0..shards {
+            let job_name = JobName::new(run_id, shard);
+            let cloud_job_id = self
+                .submit_job(&job_name, run_labels, &script_s3_url)
+                .await?;
+            jobs.push((job_name, cloud_job_id));
+        }
+
         Ok(RunTicket {
-            run_id: run_id.clone(),
-            jobs: vec![(job_name, cloud_job_id)],
+            run_id: run_id.to_owned(),
+            jobs,
         })
     }
 
