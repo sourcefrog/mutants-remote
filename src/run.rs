@@ -10,7 +10,9 @@ use jiff::Timestamp;
 use serde::Serialize;
 
 use crate::{
+    cloud::CloudJobId,
     error::{Error, Result},
+    job::JobName,
     tags::{
         CLIENT_HOSTNAME_TAG, CLIENT_USERNAME_TAG, MUTANTS_REMOTE_VERSION_TAG, RUN_START_TIME,
         SOURCE_DIR_TAIL_TAG,
@@ -39,6 +41,7 @@ pub struct RunLabels {
     /// The version of mutants-remote that created this job.
     pub mutants_remote_version: Option<String>,
     /// The start time of the run.
+    // TODO: Maybe this doesn't exactly belong in the labels but rather in the Job description?
     pub run_start_time: Option<Timestamp>,
 }
 
@@ -145,6 +148,13 @@ impl std::fmt::Display for RunId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// Identifiers for a submitted run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunTicket {
+    pub run_id: RunId,
+    pub jobs: Vec<(JobName, CloudJobId)>,
 }
 
 #[cfg(test)]

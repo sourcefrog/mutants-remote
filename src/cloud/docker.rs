@@ -18,7 +18,7 @@ use crate::cloud::{CONTAINER_USER, Cloud, CloudJobId, LogTail, OUTPUT_TARBALL_NA
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::job::{JobDescription, JobName, JobStatus, central_command};
-use crate::run::{KillTarget, RunArgs, RunId, RunLabels};
+use crate::run::{KillTarget, RunArgs, RunId, RunLabels, RunTicket};
 use crate::tags::RUN_ID_TAG;
 
 static JOB_MOUNT: &str = "/job";
@@ -76,7 +76,7 @@ impl Cloud for Docker {
         run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
-    ) -> Result<(JobName, CloudJobId)> {
+    ) -> Result<RunTicket> {
         let job_name = JobName::new(run_id, 0);
         let job_dir = self.job_dir(&job_name);
         create_dir_all(&job_dir).await?;
@@ -153,7 +153,10 @@ impl Cloud for Docker {
             return Err(Error::JobDidNotStart);
         }
         debug!(?job_name, ?container_id, "Started Docker container");
-        Ok((job_name.clone(), CloudJobId::new(&container_id)))
+        Ok(RunTicket {
+            run_id: run_id.to_owned(),
+            jobs: vec![(job_name.clone(), CloudJobId::new(&container_id))],
+        })
     }
 
     async fn fetch_output(&self, job_name: &JobName, dest_dir: &Path) -> Result<PathBuf> {

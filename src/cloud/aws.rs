@@ -28,7 +28,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::{Cloud, CloudJobId, LogTail};
 use crate::{
     Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME, cloud::DEFAULT_BUCKET_PREFIX,
-    job::central_command, tags::OUTPUT_TARBALL_URL_TAG,
+    job::central_command, run::RunTicket, tags::OUTPUT_TARBALL_URL_TAG,
 };
 use crate::{
     config::Config,
@@ -231,7 +231,7 @@ impl Cloud for AwsCloud {
         run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
-    ) -> Result<(JobName, CloudJobId)> {
+    ) -> Result<RunTicket> {
         let shards: usize = run_args.shards;
         assert!(shards > 0, "Shard count must be greater than zero");
         let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
@@ -334,9 +334,12 @@ impl Cloud for AwsCloud {
             .await
             .inspect_err(|err| error!(?err, "SubmitJob failed"))?;
 
-        let job_id = result.job_id().unwrap().to_owned();
-        info!(?job_id, "Job submitted successfully: {:?}", result);
-        Ok((job_name, CloudJobId(job_id)))
+        let cloud_job_id = CloudJobId::new(result.job_id().expect("submitted job id"));
+        info!(?cloud_job_id, "Job submitted successfully: {:?}", result);
+        Ok(RunTicket {
+            run_id: run_id.clone(),
+            jobs: vec![(job_name, cloud_job_id)],
+        })
     }
 
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription> {

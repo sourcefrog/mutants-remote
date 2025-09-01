@@ -174,19 +174,22 @@ async fn inner_main() -> Result<()> {
             // TODO: Maybe run the baseline once and then copy it, with <https://github.com/sourcefrog/cargo-mutants/issues/541>
 
             info!("Submitting job");
-            let (job_name, cloud_job_id) = cloud
+            let run_ticket = cloud
                 .submit(&run_id, &run_labels, &run_args, &source_tarball_path)
                 .await
                 .inspect_err(|err| error!("Failed to submit job: {err}"))?;
 
             // Monitor job
-            let (_final_status, started_running) = monitor_job(cloud.as_ref(), &cloud_job_id)
+            // TODO: Generalize to multiple jobs
+            let cloud_job_id = &run_ticket.jobs[0].1;
+            let job_name = &run_ticket.jobs[0].0;
+            let (_final_status, started_running) = monitor_job(cloud.as_ref(), cloud_job_id)
                 .await
                 .inspect_err(|err| error!("Failed to monitor job: {err}"))?;
 
             // Fetch output, only if it ever successfully launched.
             if started_running {
-                match cloud.fetch_output(&job_name, &tempdir).await {
+                match cloud.fetch_output(job_name, &tempdir).await {
                     Ok(output_path) => {
                         info!(
                             "Job completed successfully. Output available at: {}",

@@ -28,7 +28,7 @@ use crate::{
     config::Config,
     error::{Error, Result},
     job::{self, JobDescription, JobName, JobStatus},
-    run::{KillTarget, RunArgs, RunId, RunLabels},
+    run::{KillTarget, RunArgs, RunId, RunLabels, RunTicket},
     tags::RUN_ID_TAG,
 };
 
@@ -63,7 +63,7 @@ impl Cloud for Kubernetes {
         run_labels: &RunLabels,
         run_args: &RunArgs,
         source_tarball: &Path,
-    ) -> Result<(JobName, CloudJobId)> {
+    ) -> Result<RunTicket> {
         // TODO: Copy the source tarball to some storage location accessible to the job
         // TODO: Spawn indexed jobs for the shards? Or just multiple jobs?
         assert_eq!(
@@ -118,7 +118,13 @@ impl Cloud for Kubernetes {
             .await
             .inspect(|job| debug!(?job, "Job created"))
             .inspect_err(|err| error!("Failed to create job: {err}"))?;
-        Ok((job_name.clone(), CloudJobId::new(&name_string)))
+        Ok(RunTicket {
+            run_id: run_id.to_owned(),
+            jobs: vec![(
+                job_name.clone(),
+                CloudJobId::new(&job.metadata.name.unwrap()),
+            )],
+        })
     }
 
     async fn fetch_output(&self, job_name: &JobName, dest_dir: &Path) -> Result<PathBuf> {
