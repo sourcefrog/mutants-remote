@@ -384,7 +384,7 @@ fn setup_tracing(temp_path: &Path) {
             // maybe we should have a separate log file for them?
             metadata.target().starts_with("mutants_remote")
         }))
-        .with_filter(LevelFilter::DEBUG);
+        .with_filter(LevelFilter::TRACE);
     let stderr_layer = fmt::Layer::new()
         .with_target(true)
         .with_level(true)

@@ -314,6 +314,66 @@ impl AwsCloud {
         info!(?cloud_job_id, "Job submitted successfully: {:?}", result);
         Ok(cloud_job_id)
     }
+
+    /// Describe up to 100 jobs in a single call
+    async fn describe_jobs(&self, cloud_job_ids: &[&CloudJobId]) -> Result<Vec<JobDescription>> {
+        let id_strings = cloud_job_ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>();
+        trace!(?id_strings, "Describe jobs");
+        let description = self
+            .batch_client
+            .describe_jobs()
+            .set_jobs(Some(id_strings))
+            .send()
+            .await
+            .map_err(|e| {
+                error!("Describe job failed: {}", e);
+                Error::Cloud(e.into())
+            })?;
+        trace!(?description, "Got description");
+        let mut result = Vec::new();
+        for job_detail in description.jobs() {
+            let ecs_properties = job_detail.ecs_properties().expect("ecs_properties");
+            assert_eq!(
+                ecs_properties.task_properties().len(),
+                1,
+                "Expected exactly one task"
+            );
+            let container_properties = &ecs_properties.task_properties()[0].containers()[0];
+            let log_stream_name = container_properties
+                .log_stream_name()
+                .map(ToOwned::to_owned);
+            let raw_job_name = job_detail.job_name().map(ToOwned::to_owned);
+            let job_name = raw_job_name.as_ref().and_then(|n| {
+                n.parse()
+                    .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
+                    .ok()
+            });
+            let tags = job_detail
+                .tags
+                .as_ref()
+                .map_or_else(HashMap::new, HashMap::clone);
+            let run_labels = Some(RunLabels::from_tags(&tags));
+            result.push(JobDescription {
+                cloud_job_id: CloudJobId::new(job_detail.job_id().expect("Job ID is required")),
+                status: JobStatus::from(job_detail.status()),
+                status_reason: job_detail.status_reason().map(ToOwned::to_owned),
+                log_stream_name,
+                raw_job_name,
+                job_name,
+                created_at: from_unix_millis(job_detail.created_at),
+                started_at: from_unix_millis(job_detail.started_at),
+                stopped_at: from_unix_millis(job_detail.stopped_at),
+                cloud_tags: job_detail.tags.clone(),
+                output_tarball_url: tags.get(OUTPUT_TARBALL_URL_TAG).cloned(),
+                run_labels,
+            });
+        }
+        debug_assert_eq!(result.len(), cloud_job_ids.len());
+        Ok(result)
+    }
 }
 
 /// Find the default bucket created by Terraform.
@@ -366,57 +426,12 @@ impl Cloud for AwsCloud {
     }
 
     async fn describe_job(&self, job_id: &CloudJobId) -> Result<JobDescription> {
-        let description = self
-            .batch_client
-            .describe_jobs()
-            .jobs(job_id.0.clone())
-            .send()
-            .await
-            .map_err(|e| {
-                error!("Describe job failed: {}", e);
-                Error::Cloud(e.into())
-            })?;
-        trace!(?job_id, ?description, "Job description");
-        let job_detail = description.jobs().first().expect("Job detail");
-        let ecs_properties = job_detail.ecs_properties().expect("ecs_properties");
-        assert_eq!(
-            ecs_properties.task_properties().len(),
-            1,
-            "Expected exactly one task"
-        );
-        let container_properties = &ecs_properties.task_properties()[0].containers()[0];
-        let log_stream_name = container_properties
-            .log_stream_name()
-            .map(ToOwned::to_owned);
-        let raw_job_name = job_detail.job_name().map(ToOwned::to_owned);
-        let job_name = raw_job_name.as_ref().and_then(|n| {
-            n.parse()
-                .inspect_err(|err| warn!(?raw_job_name, ?err, "Failed to parse job name"))
-                .ok()
-        });
-        let tags = job_detail
-            .tags
-            .as_ref()
-            .map_or_else(HashMap::new, HashMap::clone);
-        let run_labels = Some(RunLabels::from_tags(&tags));
-        Ok(JobDescription {
-            cloud_job_id: job_id.clone(),
-            status: JobStatus::from(description.jobs()[0].status()),
-            status_reason: job_detail.status_reason().map(ToOwned::to_owned),
-            log_stream_name,
-            raw_job_name,
-            job_name,
-            created_at: from_unix_millis(job_detail.created_at),
-            started_at: from_unix_millis(job_detail.started_at),
-            stopped_at: from_unix_millis(job_detail.stopped_at),
-            cloud_tags: job_detail.tags.clone(),
-            output_tarball_url: tags.get(OUTPUT_TARBALL_URL_TAG).cloned(),
-            run_labels,
-        })
+        Ok(self.describe_jobs(&[job_id]).await?.remove(0))
     }
 
     async fn kill(&self, kill_target: KillTarget) -> Result<()> {
         debug!(?kill_target);
+        // TODO: Maybe merge into list?
         let jobs_to_kill = self
             .list_jobs(None)
             .await?
@@ -470,7 +485,7 @@ impl Cloud for AwsCloud {
     async fn list_jobs(&self, since: Option<Timestamp>) -> Result<Vec<JobDescription>> {
         // TODO: Maybe filter jobs, perhaps with a default cutoff some time before now?
         // TODO: Maybe filter to one queue?
-        debug!(job_queue_name = ?self.job_queue_name, "Listing jobs");
+        debug!(job_queue_name = ?self.job_queue_name, ?since, "Listing jobs");
         // We must set a filter to get jobs in all states.
         let cutoff_unix_millis = since.map_or(0, |since| since.as_millisecond());
         let filters = KeyValuesPair::builder()
@@ -485,17 +500,21 @@ impl Cloud for AwsCloud {
         let stream = list_jobs_builder.into_paginator().items().send();
         let summaries = stream.collect::<Vec<_>>().await;
         debug!("Received {} job summaries", summaries.len());
-        let mut jobs = Vec::new();
+        let mut cloud_job_ids = Vec::new();
         for summary in summaries {
-            // TODO: We could actually describe them in batches of up to 100 jobs at a time
             let summary = summary.inspect_err(|err| error!(?err, "list_jobs error"))?;
-            // To get the tags, which will let us understand what the job is doing, we have to describe the job
-            let cloud_job_id = CloudJobId(summary.job_id.expect("job_id"));
-            let description = self
-                .describe_job(&cloud_job_id)
-                .await
-                .inspect_err(|err| error!(?err, "describe_job error"))?;
-            jobs.push(description);
+            cloud_job_ids.push(CloudJobId(summary.job_id.expect("job_id")));
+        }
+        // To get the tags, which will let us understand what the job is doing, we have to Describe all the jobs.
+        let mut jobs = Vec::new();
+        for chunk in cloud_job_ids.chunks(100) {
+            let chunk2: Vec<&CloudJobId> = chunk.iter().collect();
+            jobs.append(
+                self.describe_jobs(&chunk2)
+                    .await
+                    .inspect_err(|err| error!(?err, "describe_job error"))?
+                    .as_mut(),
+            );
         }
         debug!("{} jobs listed", jobs.len());
         Ok(jobs)
