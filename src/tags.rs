@@ -30,3 +30,6 @@ pub static MUTANTS_REMOTE_VERSION_TAG: &str = "mutants.rs/version";
 
 /// The rfc9557 time that the job was created.
 pub static RUN_START_TIME: &str = "mutants.rs/run-start-time";
+
+/// The URL for the output tarball.
+pub static OUTPUT_TARBALL_URL_TAG: &str = "mutants.rs/output-tarball-url";

@@ -191,6 +191,7 @@ impl TryFrom<K8sJob> for JobDescription {
             stopped_at: None,
             cloud_tags: None,
             run_labels: None,
+            output_tarball_url: None, // Not implemented yet for Kubernetes
         })
     }
 }

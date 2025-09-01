@@ -312,6 +312,7 @@ fn parse_docker_ps_output(container_ls_json: &str) -> Result<Vec<JobDescription>
             stopped_at: None, // not reported exactly but we could get it from the string in the status
             cloud_tags,
             run_labels,
+            output_tarball_url: None, // not implemented yet for Docker
         })
     }
     Ok(jobs)

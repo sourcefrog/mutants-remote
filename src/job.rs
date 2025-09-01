@@ -79,6 +79,9 @@ pub struct JobDescription {
     pub cloud_tags: Option<HashMap<String, String>>,
     /// Structured metadata about the run this job is a part of.
     pub run_labels: Option<RunLabels>,
+
+    /// The URL at which the job's output tarball can be downloaded, if it's complete.
+    pub output_tarball_url: Option<String>,
 }
 
 impl JobDescription {
@@ -140,7 +143,11 @@ impl JobStatus {
 /// Return the main command to be run.
 ///
 /// This can be wrapped in cloud-specific commands.
-pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: impl ToString) -> String {
+pub fn central_command(
+    run_args: &RunArgs,
+    shard_k: impl ToString,
+    shard_n: impl ToString,
+) -> String {
     // TODO: Maybe Vec<String> instead?
     let script = format!(
         "cargo mutants {cargo_mutants_args} --shard {shard_k}/{shard_n} -vV || true",
@@ -150,6 +157,7 @@ pub fn central_command(run_args: &RunArgs, shard_k: u32, shard_n: impl ToString)
             .map(|a| a.quoted(shell_quote::Bash))
             .collect::<Vec<String>>()
             .join(" "),
+        shard_k = shard_k.to_string(),
         shard_n = shard_n.to_string()
     );
     debug!(?script);

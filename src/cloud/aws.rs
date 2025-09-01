@@ -13,8 +13,8 @@ use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_batch::{
     error::SdkError,
     types::{
-        EcsPropertiesOverride, JobStatus as AwsJobStatus, KeyValuesPair, ResourceRequirement,
-        ResourceType, TaskContainerOverrides, TaskPropertiesOverride,
+        EcsPropertiesOverride, JobStatus as AwsJobStatus, KeyValuePair, KeyValuesPair,
+        ResourceRequirement, ResourceType, TaskContainerOverrides, TaskPropertiesOverride,
     },
 };
 use aws_sdk_cloudwatchlogs::primitives::event_stream::EventReceiver;
@@ -28,7 +28,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::{Cloud, CloudJobId, LogTail};
 use crate::{
     Error, Result, SOURCE_TARBALL_NAME, TOOL_NAME, cloud::DEFAULT_BUCKET_PREFIX,
-    job::central_command,
+    job::central_command, tags::OUTPUT_TARBALL_URL_TAG,
 };
 use crate::{
     config::Config,
@@ -157,7 +157,7 @@ impl AwsCloud {
     /// The S3 key for the output tarball for a job.
     fn output_tarball_key(&self, job_name: &JobName) -> String {
         format!(
-            "{}/{}",
+            "{}-{}",
             self.job_name_prefix(job_name),
             super::OUTPUT_TARBALL_NAME
         )
@@ -234,20 +234,16 @@ impl Cloud for AwsCloud {
     ) -> Result<(JobName, CloudJobId)> {
         let shards: usize = run_args.shards;
         assert!(shards > 0, "Shard count must be greater than zero");
-        let shard_k = 0;
-        let job_name = JobName {
-            run_id: run_id.clone(),
-            shard_k,
-        };
         let source_tarball_s3_url = self.upload_source_tarball(run_id, source_tarball).await?;
-        let output_tarball_url = self.output_tarball_s3_url(&job_name);
 
         // Because AWS apparently has modest limits on the length of the size of the job overrides we upload
         // the script to S3 and then fetch that object.
-        let script = central_command(run_args, shard_k, shards);
+        let script = central_command(run_args, "${MUTANTS_REMOTE_SHARD}", shards);
         let script_key = format!("{}/script.sh", self.run_prefix(run_id));
+        let job_name = JobName::new(run_id, 0);
+        let output_tarball_url = self.output_tarball_s3_url(&job_name);
         let wrapped_script = format!(
-            "
+            r#"
             free -m && id && pwd && df -m &&
             cd &&
             pwd &&
@@ -259,8 +255,8 @@ impl Cloud for AwsCloud {
             tar xf /tmp/mutants.tar.zst --zstd &&
             {script}
             tar cf /tmp/mutants.out.tar.zstd mutants.out --zstd &&
-            aws s3 cp /tmp/mutants.out.tar.zstd {output_tarball_url}
-            ",
+            aws s3 cp /tmp/mutants.out.tar.zstd ${{MUTANTS_REMOTE_OUTPUT}}
+            "#,
         );
         let script_s3_url = self.s3_url(&script_key);
         debug!(?wrapped_script, ?script_s3_url, "Uploading script to S3");
@@ -299,6 +295,19 @@ impl Cloud for AwsCloud {
                     .build(),
             )
         }
+        task_container_overrides = task_container_overrides
+            .environment(
+                KeyValuePair::builder()
+                    .name("MUTANTS_REMOTE_SHARD")
+                    .value("0")
+                    .build(),
+            )
+            .environment(
+                KeyValuePair::builder()
+                    .name("MUTANTS_REMOTE_OUTPUT")
+                    .value(output_tarball_url.clone())
+                    .build(),
+            );
         let task_container_overrides = task_container_overrides.build();
         let task_properties_overrides = TaskPropertiesOverride::builder()
             .containers(task_container_overrides)
@@ -314,6 +323,7 @@ impl Cloud for AwsCloud {
             .job_queue(&self.job_queue_name)
             .job_definition(&self.job_definition_name)
             .tags(RUN_ID_TAG, run_id.to_string())
+            .tags(OUTPUT_TARBALL_URL_TAG, output_tarball_url.clone())
             .propagate_tags(true)
             .ecs_properties_override(ecs_properties_overrides);
         for (key, value) in run_labels.to_tags() {
@@ -374,6 +384,7 @@ impl Cloud for AwsCloud {
             started_at: from_unix_millis(job_detail.started_at),
             stopped_at: from_unix_millis(job_detail.stopped_at),
             cloud_tags: job_detail.tags.clone(),
+            output_tarball_url: tags.get(OUTPUT_TARBALL_URL_TAG).cloned(),
             run_labels,
         })
     }
