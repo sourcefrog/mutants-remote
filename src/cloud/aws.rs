@@ -277,7 +277,7 @@ impl Cloud for AwsCloud {
             .await?;
 
         let full_command =
-            format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh",);
+            format!("aws s3 cp {script_s3_url} /tmp/script.sh && /bin/bash -ex /tmp/script.sh");
 
         let job_name = JobName::new(run_id, 0);
         info!(?job_name, "Submitting job");
