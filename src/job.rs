@@ -20,11 +20,11 @@ use crate::{
 pub struct JobName {
     pub run_id: RunId,
     // TODO: Maybe later an enum allowing for separate baseline and mutants jobs.
-    pub shard_k: u32,
+    pub shard_k: usize,
 }
 
 impl JobName {
-    pub fn new(run_id: &RunId, shard_k: u32) -> Self {
+    pub fn new(run_id: &RunId, shard_k: usize) -> Self {
         JobName {
             run_id: run_id.clone(),
             shard_k,
