@@ -30,6 +30,11 @@ pub struct Config {
     /// The Docker image to use for the remote environment.
     pub image_name: Option<String>,
 
+    /// The name of the AWS profile, specifying credentials.
+    ///
+    /// Profiles are specified in the `~/.aws/config` file.
+    pub aws_profile: Option<String>,
+
     /// The name of the bucket to store artifacts, including input source tarballs and results.
     pub aws_s3_bucket: Option<String>,
     /// The name of the AWS Batch job queue to use.

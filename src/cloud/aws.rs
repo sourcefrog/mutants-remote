@@ -9,7 +9,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
+use aws_config::BehaviorVersion;
 use aws_sdk_batch::{
     error::SdkError,
     types::{
@@ -56,9 +56,11 @@ pub struct AwsCloud {
 
 impl AwsCloud {
     pub async fn new(config: Config) -> Result<Self> {
-        let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
-        let sdk_config = aws_config::defaults(BehaviorVersion::latest())
-            .region(region_provider)
+        let mut config_loader = aws_config::defaults(BehaviorVersion::latest());
+        if let Some(profile_name) = &config.aws_profile {
+            config_loader = config_loader.profile_name(profile_name);
+        }
+        let sdk_config = config_loader
             .app_name(
                 aws_config::AppName::new(format!("{}-{}", env!("CARGO_PKG_NAME"), crate::VERSION))
                     .unwrap(),

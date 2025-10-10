@@ -1,12 +1,15 @@
 cloud_provider = "AwsBatch"
-aws_s3_bucket = "mutants-remote-tmp-123456789" # By default, finds the bucket created by the Terraform script
-aws_batch_job_queue = "mutants" # default is "mutants"
 vcpus = 4 # default is set in Terraform
 memory = 16384 # default is set in Terraform
-aws_batch_job_definition = "mutants-amd64" # default is "mutants-amd64", or use "mutants-arm64"
-aws_log_group_name = "mutants-remote" # default is "mutants-remote"
 copy_exclude = ["target", ".git"] # default is empty, these are recommended
 cargo_mutants_args = [
     '--cargo-arg=--config=linker="clang"',
     '--cargo-arg=--config=rustflags=["-C", "link-arg=--ld-path=wild"]',
 ]
+
+# AWS
+aws_profile = "mutants-remote"  # identifies a section in ~/.aws/config, by default uses $AWS_PROFILE or the default
+aws_s3_bucket = "mutants-remote-tmp-123456789" # By default, finds the bucket created by the Terraform script
+aws_batch_job_queue = "mutants" # default is "mutants"
+aws_batch_job_definition = "mutants-amd64" # default is "mutants-amd64", or use "mutants-arm64"
+aws_log_group_name = "mutants-remote" # default is "mutants-remote"
